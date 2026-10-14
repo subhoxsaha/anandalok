@@ -1,0 +1,107 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net - deny all by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    // Check if user is a verified administrator (by whitelisted email or dynamic Firestore role check)
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'subhoxsaha@gmail.com' ||
+        request.auth.token.email == 'admin@anandalok.org' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'central_admin')
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Collection: causes
+    match /causes/{causeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Collection: blogs (Field Stories)
+    match /blogs/{blogId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Collection: events (Field Drives)
+    match /events/{eventId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Collection: products (Artisan Crafts)
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Collection: gallery
+    match /gallery/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Collection: hero_images
+    match /hero_images/{imageId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Collection: donations
+    match /donations/{donationId} {
+      allow read: if isAdmin() || (isSignedIn() && existing().donorEmail == request.auth.token.email);
+      allow create: if true; // anyone can make a donation, but let's validate payload format
+      allow update, delete: if isAdmin();
+    }
+
+    // Collection: volunteers
+    match /volunteers/{volunteerId} {
+      allow read: if isAdmin() || (isSignedIn() && (existing().volunteerId == request.auth.uid || existing().volunteerEmail == request.auth.token.email));
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || (isSignedIn() && existing().volunteerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'feedback']));
+      allow delete: if isAdmin();
+    }
+
+    // Collection: orders (Artisan Marketplace)
+    match /orders/{orderId} {
+      allow read: if isAdmin() || (isSignedIn() && (existing().customerEmail == request.auth.token.email));
+      allow create: if isSignedIn();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Collection: users
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isSignedIn() && request.auth.uid == userId && (
+        // Prevent users from escalating their own role to central_admin
+        (!incoming().keys().hasAll(['role']) || incoming().role == 'general_user' || isAdmin())
+      );
+    }
+  }
+}

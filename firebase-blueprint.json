@@ -1,0 +1,157 @@
+{
+  "entities": {
+    "Cause": {
+      "title": "Cause",
+      "description": "Donation causes and social welfare projects",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "tagline": { "type": "string" },
+        "description": { "type": "string" },
+        "targetAmount": { "type": "number" },
+        "raisedAmount": { "type": "number" },
+        "donorCount": { "type": "number" },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "isFeatured": { "type": "boolean" },
+        "impactMetrics": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["id", "title", "description", "targetAmount", "raisedAmount"]
+    },
+    "BlogPost": {
+      "title": "BlogPost",
+      "description": "News and stories from the field",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "excerpt": { "type": "string" },
+        "content": { "type": "string" },
+        "author": { "type": "string" },
+        "date": { "type": "string" },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "readTime": { "type": "string text" }
+      },
+      "required": ["id", "title", "content", "author", "date"]
+    },
+    "VolunteerEvent": {
+      "title": "VolunteerEvent",
+      "description": "Upcoming and past volunteer field drives",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "location": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "volunteersNeeded": { "type": "number" },
+        "volunteersRegistered": { "type": "number" },
+        "imageUrl": { "type": "string" }
+      },
+      "required": ["id", "title", "location", "date"]
+    },
+    "ArtisanProduct": {
+      "title": "ArtisanProduct",
+      "description": "Handcrafted items made by rural craftswomen",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "artisanName": { "type": "string" },
+        "village": { "type": "string" },
+        "price": { "type": "number" },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "description": { "type": "string" },
+        "impactDays": { "type": "number" },
+        "inStock": { "type": "boolean" }
+      },
+      "required": ["id", "title", "artisanName", "price"]
+    },
+    "GalleryItem": {
+      "title": "GalleryItem",
+      "description": "Photos from field activities",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "caption": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "title", "imageUrl"]
+    },
+    "HeroImage": {
+      "title": "HeroImage",
+      "description": "Banner background slides for the home hero section",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": "string" },
+        "caption": { "type": "string" }
+      },
+      "required": ["id", "url", "title"]
+    },
+    "Donation": {
+      "title": "Donation",
+      "description": "80G donation records and tax receipts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "donorName": { "type": "string" },
+        "donorEmail": { "type": "string" },
+        "donorPhone": { "type": "string" },
+        "donorPan": { "type": "string" },
+        "amount": { "type": "number" },
+        "causeId": { "type": "string" },
+        "causeTitle": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "date": { "type": "string" },
+        "taxReceiptEligible": { "type": "boolean" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "transactionId", "donorName", "amount", "date"]
+    },
+    "VolunteerRegistration": {
+      "title": "VolunteerRegistration",
+      "description": "Volunteer signups and status tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "eventTitle": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "skills": { "type": "string" },
+        "availability": { "type": "string" },
+        "status": { "type": "string" },
+        "hoursLogged": { "type": "number" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "eventId", "fullName", "email"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profiles and roles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "phone": { "type": "string" },
+        "hoursContributed": { "type": "number" },
+        "totalDonated": { "type": "number" }
+      },
+      "required": ["id", "name", "email", "role"]
+    }
+  }
+}

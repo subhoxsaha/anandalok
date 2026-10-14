@@ -1,0 +1,6 @@
+{
+  "name": "Anandalok Welfare Foundation",
+  "description": "Empowering communities through child welfare, women empowerment, cloth drives, and an authentic local artisan craft marketplace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
