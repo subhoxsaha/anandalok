@@ -40,8 +40,7 @@ export interface CashfreeVerificationResponse {
   error?: string;
 }
 
-// Fallback production credentials if server environment variables are unset on Vercel
-const PROD_CLIENT_ID = '';
+const PROD_CLIENT_ID = import.meta.env.VITE_CASHFREE_APP_ID || '';
 const PROD_CLIENT_SECRET = '';
 const CASHFREE_API_VERSION = '2023-08-01';
 

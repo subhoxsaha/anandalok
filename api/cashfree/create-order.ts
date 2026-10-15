@@ -43,7 +43,6 @@ export default async function handler(req: any, res: any) {
       ? customerEmail.trim()
       : 'supporter@anandalok.org';
 
-    // Cashfree Production Credentials
     const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || '';
     const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY || '';
     const CASHFREE_ENV = (process.env.CASHFREE_ENV || 'production').toLowerCase();
