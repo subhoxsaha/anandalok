@@ -437,36 +437,130 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, currentUs
             {/* GENERAL USER LOGIN VIEW */}
             {activeTab === 'user' && (
               <div className="space-y-4 pt-1">
-                <div className="p-3.5 bg-amber-50/50 border border-amber-100 rounded-xl space-y-1 text-center">
-                  <p className="text-xs font-bold text-slate-800">
-                    Sign in to your Anandalok Community Account
-                  </p>
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    General user sign-in proceeds securely using your Google Account.
-                  </p>
+                <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setGeneralAuthMethod('google')}
+                    className={`flex-1 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      generalAuthMethod === 'google' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Google Auth
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGeneralAuthMethod('email')}
+                    className={`flex-1 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      generalAuthMethod === 'email' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Email & Password
+                  </button>
                 </div>
 
-                <div className="space-y-3 pt-1">
-                  <button
-                    onClick={() => handleGoogleSignIn('general_user')}
-                    disabled={loading}
-                    className="w-full py-3 px-4 rounded-xl border border-slate-200 hover:border-amber-400 bg-white hover:bg-amber-50/20 text-slate-700 hover:text-slate-900 font-extrabold text-xs transition-all flex items-center justify-center gap-2.5 shadow-xs cursor-pointer disabled:opacity-50"
-                  >
-                    {loading ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
-                    ) : (
-                      <img 
-                        src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" 
-                        alt="Google" 
-                        className="w-4 h-4 shrink-0"
-                      />
+                {generalAuthMethod === 'google' ? (
+                  <div className="space-y-3 pt-1">
+                    <div className="p-3 bg-amber-50/50 border border-amber-100 rounded-xl space-y-1 text-center">
+                      <p className="text-xs font-bold text-slate-800">
+                        Quick Community Sign In
+                      </p>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        Sign in instantly with your verified Google Account.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => handleGoogleSignIn('general_user')}
+                      disabled={loading}
+                      className="w-full py-3 px-4 rounded-xl border border-slate-200 hover:border-amber-400 bg-white hover:bg-amber-50/20 text-slate-700 hover:text-slate-900 font-extrabold text-xs transition-all flex items-center justify-center gap-2.5 shadow-xs cursor-pointer disabled:opacity-50"
+                    >
+                      {loading ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+                      ) : (
+                        <img 
+                          src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" 
+                          alt="Google" 
+                          className="w-4 h-4 shrink-0"
+                        />
+                      )}
+                      {loading ? 'Authenticating...' : 'Continue with Google'}
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleGeneralEmailAuth} className="space-y-3 pt-1">
+                    <div className="flex justify-between items-center bg-slate-50 p-1 rounded-lg border border-slate-200 text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setGeneralMode('signin')}
+                        className={`flex-1 py-1 text-center rounded transition-all cursor-pointer ${
+                          generalMode === 'signin' ? 'bg-amber-500 text-slate-950 font-black shadow-2xs' : 'text-slate-600'
+                        }`}
+                      >
+                        Sign In
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGeneralMode('register')}
+                        className={`flex-1 py-1 text-center rounded transition-all cursor-pointer ${
+                          generalMode === 'register' ? 'bg-amber-500 text-slate-950 font-black shadow-2xs' : 'text-slate-600'
+                        }`}
+                      >
+                        Register
+                      </button>
+                    </div>
+
+                    {generalMode === 'register' && (
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">Full Name</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Priya Sharma"
+                          value={generalName}
+                          onChange={(e) => setGeneralName(e.target.value)}
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none bg-slate-50/50"
+                        />
+                      </div>
                     )}
-                    {loading ? 'Authenticating...' : 'Continue with Google'}
-                  </button>
-                  <p className="text-[10px] text-slate-400 text-center leading-relaxed">
-                    Instant single-tap authentication using your verified Google credentials.
-                  </p>
-                </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Email Address</label>
+                      <input
+                        type="email"
+                        required
+                        placeholder="you@example.com"
+                        value={generalEmail}
+                        onChange={(e) => setGeneralEmail(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none bg-slate-50/50"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Password</label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="••••••••"
+                        value={generalPassword}
+                        onChange={(e) => setGeneralPassword(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none bg-slate-50/50"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all shadow-xs cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
+                    >
+                      {loading ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                      ) : (
+                        <LogIn className="w-4 h-4" />
+                      )}
+                      <span>{generalMode === 'signin' ? 'Sign In to Account' : 'Create Account'}</span>
+                    </button>
+                  </form>
+                )}
               </div>
             )}
 

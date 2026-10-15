@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FEDC00" />
+      <stop offset="100%" stop-color="#F59E0B" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Circular Base Badge -->
+  <circle cx="50" cy="50" r="48" fill="#0F172A" stroke="url(#goldGrad)" stroke-width="4" filter="url(#shadow)" />
+  
+  <!-- Radiating Rays / Sunburst of Hope -->
+  <g stroke="url(#goldGrad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9">
+    <line x1="50" y1="12" x2="50" y2="18" />
+    <line x1="77" y1="23" x2="73" y2="28" />
+    <line x1="88" y1="50" x2="82" y2="50" />
+    <line x1="77" y1="77" x2="73" y2="72" />
+    <line x1="50" y1="88" x2="50" y2="82" />
+    <line x1="23" y1="77" x2="27" y2="72" />
+    <line x1="12" y1="50" x2="18" y2="50" />
+    <line x1="23" y1="23" x2="27" y2="28" />
+  </g>
+
+  <!-- Central Holding Hands & Heart Glyph (Anandalok Emblem) -->
+  <!-- Left hand cupping -->
+  <path d="M 28 56 C 28 46, 36 42, 42 42 C 45 42, 48 44, 50 47 C 52 44, 55 42, 58 42 C 64 42, 72 46, 72 56 C 72 66, 58 75, 50 80 C 42 75, 28 66, 28 56 Z" fill="url(#goldGrad)" />
+  
+  <!-- Inner heart accent in contrasting slate -->
+  <path d="M 36 54 C 36 49, 41 46, 45 46 C 47.5 46, 49 48, 50 50 C 51 48, 52.5 46, 55 46 C 59 46, 64 49, 64 54 C 64 61, 54 68, 50 71 C 46 68, 36 61, 36 54 Z" fill="#0F172A" />
+
+  <!-- Radiance dot in center -->
+  <circle cx="50" cy="34" r="5" fill="#FEDC00" />
+</svg>

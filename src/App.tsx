@@ -32,6 +32,7 @@ import {
 } from './lib/storage';
 import { auth } from './lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { verifyCashfreeOrder } from './lib/cashfreeService';
 import {
   User,
   Cause,
@@ -58,9 +59,12 @@ import { CMSDashboard } from './components/cms/CMSDashboard';
 import { DonationModal } from './components/donation/DonationModal';
 import { AuthModal } from './components/auth/AuthModal';
 import { CraftCartModal } from './components/marketplace/CraftCartModal';
+import { AccountSettingsPage } from './components/account/AccountSettingsPage';
+import { SEOHead } from './components/common/SEOHead';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('home');
+  const [selectedCauseForDetail, setSelectedCauseForDetail] = useState<Cause | null>(null);
 
   // Adjust screen position (scroll to top) during page changes
   useEffect(() => {
@@ -99,6 +103,80 @@ export default function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [selectedProductForDetail, setSelectedProductForDetail] = useState<ArtisanProduct | null>(null);
+
+  // Handle URL deep-linking on mount & popstate
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      const prodId = params.get('product');
+      const causeId = params.get('cause');
+
+      const allProds = getProducts();
+      const allCauses = getCauses();
+
+      if (prodId) {
+        const found = allProds.find((p) => p.id === prodId);
+        if (found) {
+          setSelectedProductForDetail(found);
+          setActiveTab('marketplace');
+          return;
+        }
+      }
+
+      if (causeId) {
+        const found = allCauses.find((c) => c.id === causeId);
+        if (found) {
+          setSelectedCauseForDetail(found);
+          setActiveTab('causes');
+          return;
+        }
+      }
+
+      const paymentId = params.get('payment_id');
+      if (paymentId) {
+        verifyCashfreeOrder(paymentId).then((res) => {
+          if (res.paid) {
+            console.info('Cashfree payment confirmed for:', paymentId);
+          } else {
+            console.warn('Cashfree payment incomplete or failed for:', paymentId, res.failureReason);
+          }
+        }).catch((err) => {
+          console.warn('Redirected payment status check:', err);
+        });
+      }
+
+      if (tabParam) {
+        setActiveTab(tabParam);
+      }
+    };
+
+    handleUrlChange();
+    window.addEventListener('popstate', handleUrlChange);
+    return () => window.removeEventListener('popstate', handleUrlChange);
+  }, []);
+
+  // Synchronize browser URL query params with current page, product, and cause
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedProductForDetail) {
+      params.set('tab', 'marketplace');
+      params.set('product', selectedProductForDetail.id);
+    } else if (selectedCauseForDetail) {
+      params.set('tab', 'causes');
+      params.set('cause', selectedCauseForDetail.id);
+    } else if (activeTab !== 'home') {
+      params.set('tab', activeTab);
+    }
+
+    const queryString = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    const currentSearch = window.location.search;
+    const targetSearch = params.toString() ? `?${params.toString()}` : '';
+
+    if (currentSearch !== targetSearch) {
+      window.history.replaceState(null, '', queryString);
+    }
+  }, [activeTab, selectedProductForDetail, selectedCauseForDetail]);
 
   // Subscribe to storage changes for live real-time state sync across tabs
   useEffect(() => {
@@ -270,6 +348,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-clip bg-slate-50 text-slate-800 flex flex-col font-sans antialiased selection:bg-amber-200 selection:text-amber-900">
+      {/* Dynamic SEO Head with OpenGraph, Twitter, and Schema.org structured data */}
+      <SEOHead
+        activeTab={activeTab}
+        selectedProduct={selectedProductForDetail}
+        selectedCause={selectedCauseForDetail}
+        causes={causes}
+        products={products}
+      />
+
       {/* Header */}
       <Header
         activeTab={activeTab}
@@ -300,7 +387,14 @@ export default function App() {
             {activeTab === 'home' && (
               <>
                 <HeroSection heroImages={heroImages} onOpenDonate={handleOpenDonate} setActiveTab={setActiveTab} />
-                <CausesSection causes={causes} onOpenDonate={handleOpenDonate} setActiveTab={setActiveTab} isLoading={isLoadingData} />
+                <CausesSection
+                  causes={causes}
+                  onOpenDonate={handleOpenDonate}
+                  setActiveTab={setActiveTab}
+                  isLoading={isLoadingData}
+                  selectedCause={selectedCauseForDetail}
+                  onSelectCause={setSelectedCauseForDetail}
+                />
                 <ArtisanMarketplaceSection
                   products={products}
                   onAddToCart={handleAddToCart}
@@ -314,7 +408,14 @@ export default function App() {
             )}
 
             {activeTab === 'causes' && (
-              <CausesSection causes={causes} onOpenDonate={handleOpenDonate} setActiveTab={setActiveTab} isLoading={isLoadingData} />
+              <CausesSection
+                causes={causes}
+                onOpenDonate={handleOpenDonate}
+                setActiveTab={setActiveTab}
+                isLoading={isLoadingData}
+                selectedCause={selectedCauseForDetail}
+                onSelectCause={setSelectedCauseForDetail}
+              />
             )}
 
             {activeTab === 'marketplace' && (
@@ -337,6 +438,16 @@ export default function App() {
                 onClearCart={() => setCart([])}
                 currentUser={currentUser}
                 setActiveTab={setActiveTab}
+                onOpenAuth={() => setIsAuthOpen(true)}
+              />
+            )}
+
+            {activeTab === 'account' && (
+              <AccountSettingsPage
+                currentUser={currentUser}
+                onSelectUser={handleSelectUser}
+                setActiveTab={setActiveTab}
+                onOpenDonate={handleOpenDonate}
                 onOpenAuth={() => setIsAuthOpen(true)}
               />
             )}

@@ -108,13 +108,16 @@ export interface Donation {
   causeId: string;
   causeTitle: string;
   amount: number;
-  paymentMethod: 'upi' | 'card' | 'stripe' | 'netbanking' | 'offline_pledge';
+  paymentMethod: 'cashfree' | 'upi' | 'card' | 'stripe' | 'netbanking' | 'offline_pledge';
   transactionId: string;
   date: string;
   is80GClaimed: boolean;
   panNumber?: string;
   anonymous?: boolean;
   receiptUrl?: string;
+  cashfreeOrderId?: string;
+  cashfreePaymentId?: string;
+  cashfreePaymentSessionId?: string;
   stripePaymentIntentId?: string;
   stripeReceiptUrl?: string;
 }
@@ -160,6 +163,7 @@ export interface ArtisanOrderItem {
 export interface ArtisanOrder {
   id: string;
   customerName: string;
+  customerEmail?: string;
   customerPhone: string;
   customerAddress: string;
   items: ArtisanOrderItem[];
@@ -167,9 +171,12 @@ export interface ArtisanOrder {
   discount: number;
   deliveryFee: number;
   total: number;
-  paymentMethod: 'upi' | 'cod' | 'card' | 'stripe';
+  paymentMethod: 'cashfree' | 'upi' | 'card' | 'stripe';
   date: string;
   status: 'pending' | 'shipped' | 'delivered' | 'cancelled';
+  cashfreeOrderId?: string;
+  cashfreePaymentId?: string;
+  cashfreePaymentSessionId?: string;
   stripePaymentIntentId?: string;
   stripeReceiptUrl?: string;
 }

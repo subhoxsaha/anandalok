@@ -3,19 +3,111 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Anandalok Welfare Foundation</title>
-    <meta name="description" content="Empowering communities through child welfare, women empowerment, cloth drives, and an authentic local artisan craft marketplace." />
-    <meta property="og:title" content="Anandalok Welfare Foundation" />
-    <meta property="og:description" content="Empowering communities through child welfare, women empowerment, cloth drives, and an authentic local artisan craft marketplace." />
-    <meta property="og:image" content="/assets/logo.webp" />
+    <title>Anandalok Welfare Foundation | Empowering Communities</title>
+    <meta name="description" content="Empowering communities through child welfare, women empowerment, cloth drives, and an authentic local artisan craft marketplace in Durgapur, West Bengal." />
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://anandalok.vercel.app" />
+
+    <!-- Open Graph -->
+    <meta property="og:site_name" content="Anandalok Welfare Foundation" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://anandalok.vercel.app" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="en_IN" />
+    <meta property="og:title" content="Anandalok Welfare Foundation | Empowering Communities" />
+    <meta property="og:description" content="Empowering communities through child welfare, women empowerment, cloth drives, and an authentic local artisan craft marketplace in Durgapur, West Bengal." />
+    <meta property="og:image" content="https://anandalok.vercel.app/og-image.png" />
+    <meta property="og:image:secure_url" content="https://anandalok.vercel.app/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Anandalok Welfare Foundation - Spreading Happiness By Holding Hands" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@anandalok_org" />
+    <meta name="twitter:creator" content="@anandalok_org" />
+    <meta name="twitter:title" content="Anandalok Welfare Foundation | Empowering Communities" />
+    <meta name="twitter:description" content="Empowering communities through child welfare, women empowerment, cloth drives, and an authentic local artisan craft marketplace in Durgapur, West Bengal." />
+    <meta name="twitter:image" content="https://anandalok.vercel.app/og-image.png" />
+    <meta name="twitter:image:alt" content="Anandalok Welfare Foundation - Spreading Happiness By Holding Hands" />
+
+    <!-- Icons & Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+    <!-- Web App Manifest & Theme -->
+    <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#FEDC00" />
-    <link rel="icon" type="image/webp" href="/assests/logo.webp" />
-    <link rel="alternate icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" href="/assests/logo.webp" />
+    <meta name="application-name" content="Anandalok Welfare" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Anandalok" />
+
+    <!-- Schema.org JSON-LD Structured Data for Search Engine Bots -->
+    <script type="application/ld+json" id="anandalok-structured-data">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "NGO",
+          "@id": "https://anandalok.vercel.app/#organization",
+          "name": "Anandalok Welfare Foundation",
+          "alternateName": ["Anandalok Durgapur", "Anandalok NGO"],
+          "url": "https://anandalok.vercel.app",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://anandalok.vercel.app/assets/logo.webp",
+            "width": "640",
+            "height": "640",
+            "caption": "Anandalok Welfare Foundation Emblem"
+          },
+          "image": "https://anandalok.vercel.app/og-image.png",
+          "description": "Non-profit welfare organization dedicated to child education, women artisan livelihood, winter cloth distribution drives, and community health in Durgapur, West Bengal.",
+          "foundingLocation": {
+            "@type": "Place",
+            "name": "Durgapur, West Bengal, India"
+          },
+          "address": {
+            "@type": "PostalAddress",
+            "addressLocality": "Durgapur",
+            "addressRegion": "West Bengal",
+            "postalCode": "713216",
+            "addressCountry": "IN"
+          },
+          "nonprofitStatus": "https://schema.org/Nonprofit501c3",
+          "taxID": "80G Certified Non-Profit",
+          "knowsAbout": [
+            "Child Welfare & Education",
+            "Rural Women Artisan Empowerment",
+            "Doorstep Cloth Distribution",
+            "Community Health Camps"
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://anandalok.vercel.app/#website",
+          "name": "Anandalok Welfare Foundation",
+          "url": "https://anandalok.vercel.app",
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://anandalok.vercel.app/?tab=marketplace&search={search_term_string}",
+            "query-input": "required name=search_term_string"
+          }
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Semantic H1 heading for crawlers and bots prior to React hydration -->
+      <h1 class="sr-only">Anandalok Welfare Foundation | Empowering Communities</h1>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

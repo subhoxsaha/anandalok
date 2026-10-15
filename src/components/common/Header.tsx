@@ -436,13 +436,13 @@ export const Header: React.FC<HeaderProps> = ({
                         <>
                           <button
                             onClick={() => {
-                              onOpenAuth();
+                              setActiveTab('account');
                               setProfileDropdownOpen(false);
                             }}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors cursor-pointer text-left"
+                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-amber-50 hover:text-amber-900 transition-colors cursor-pointer text-left font-bold"
                           >
-                            <UserCheck className="w-3.5 h-3.5 text-slate-500" />
-                            <span>Account Settings</span>
+                            <UserCheck className="w-3.5 h-3.5 text-amber-700" />
+                            <span>Account Settings & History</span>
                           </button>
 
                           <div className="h-px bg-slate-100 my-1.5" />

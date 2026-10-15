@@ -8,19 +8,20 @@ import {
   CheckCircle,
   Download,
   Receipt,
-  Truck,
   ArrowRight,
   User as UserIcon,
   Lock,
   Loader2,
-  ExternalLink,
-  Sparkles
+  Sparkles,
+  Zap,
+  HelpCircle,
+  AlertCircle
 } from 'lucide-react';
 import { Cause, Donation, User } from '../../types';
 import { GlassModal } from '../common/ReactBitsComponents';
 import confetti from 'canvas-confetti';
 import { getCurrentUser } from '../../lib/storage';
-import { processStripePayment, TEST_CARDS } from '../../lib/stripeService';
+import { createCashfreeOrder, verifyCashfreeOrder, launchCashfreeCheckout, pollCashfreeOrderStatus } from '../../lib/cashfreeService';
 
 interface DonationModalProps {
   isOpen: boolean;
@@ -43,21 +44,22 @@ export const DonationModal: React.FC<DonationModalProps> = ({
   const isGuest = !activeUser || activeUser.id === 'guest' || !activeUser.email;
 
   const [amount, setAmount] = useState<number>(1000);
-  const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'upi' | 'netbanking' | 'offline_pledge'>('stripe');
+  const [selectedChannel, setSelectedChannel] = useState<'upi' | 'card' | 'netbanking'>('upi');
   const [donorName, setDonorName] = useState(activeUser?.name || '');
   const [donorEmail, setDonorEmail] = useState(activeUser?.email || '');
   const [donorPhone, setDonorPhone] = useState(activeUser?.phone || '');
   const [panNumber, setPanNumber] = useState('');
   const [is80GRequested] = useState(true);
-  const [step, setStep] = useState<'details' | 'payment' | 'receipt'>('details');
+  const [step, setStep] = useState<'details' | 'payment' | 'receipt' | 'failed'>('details');
   const [completedTxn, setCompletedTxn] = useState<Donation | null>(null);
 
-  // Stripe card details state
-  const [cardNumber, setCardNumber] = useState(TEST_CARDS.VISA_SUCCESS.number);
-  const [cardExp, setCardExp] = useState(TEST_CARDS.VISA_SUCCESS.exp);
-  const [cardCvc, setCardCvc] = useState(TEST_CARDS.VISA_SUCCESS.cvc);
-  const [cardZip, setCardZip] = useState(TEST_CARDS.VISA_SUCCESS.zip);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  const [paymentFailureInfo, setPaymentFailureInfo] = useState<{
+    orderId: string;
+    status: string;
+    reason: string;
+  } | null>(null);
   const [paymentError, setPaymentError] = useState('');
 
   useEffect(() => {
@@ -65,6 +67,8 @@ export const DonationModal: React.FC<DonationModalProps> = ({
       setStep('details');
       setCompletedTxn(null);
       setIsProcessing(false);
+      setIsVerifyingPayment(false);
+      setPaymentFailureInfo(null);
       setPaymentError('');
       const latestUser = currentUser || getCurrentUser();
       setDonorName(latestUser.name !== 'Guest User' ? latestUser.name : '');
@@ -109,201 +113,182 @@ export const DonationModal: React.FC<DonationModalProps> = ({
     setStep('payment');
   };
 
-  const handleFinalPay = async () => {
+  const handleFinalCashfreePay = async () => {
     setPaymentError('');
+    setPaymentFailureInfo(null);
+    setIsProcessing(true);
 
-    if (paymentMethod === 'stripe') {
-      setIsProcessing(true);
-      try {
-        const stripeRes = await processStripePayment(
-          {
-            amount,
-            donorOrCustomerName: donorName || 'Generous Contributor',
-            email: donorEmail || 'donor@anandalok.org',
-            description: `Donation to Anandalok Welfare Fund - ₹${amount}`
-          },
-          {
-            cardNumber,
-            expMonthYear: cardExp,
-            cvc: cardCvc,
-            zipCode: cardZip
-          }
-        );
+    try {
+      // 1. Create real Cashfree Order on server
+      const cfOrder = await createCashfreeOrder({
+        amount,
+        customerName: donorName.trim() || activeUser.name || 'Generous Contributor',
+        customerEmail: donorEmail.trim() || activeUser.email || 'donor@anandalok.org',
+        customerPhone: donorPhone.trim() || '9876543210',
+        note: `Anandalok Welfare Foundation Donation - ₹${amount}`,
+        returnUrl: `${window.location.origin}/?tab=home&donation=success&payment_id={order_id}`,
+      });
 
-        if (!stripeRes.success) {
-          setPaymentError(stripeRes.errorMessage || 'Stripe payment was declined. Please try again.');
-          setIsProcessing(false);
-          return;
-        }
+      // 2. Trigger Cashfree client modal checkout
+      await launchCashfreeCheckout(cfOrder.paymentSessionId);
 
+      // 3. Poll payment status from Cashfree Gateway directly
+      setIsProcessing(false);
+      setIsVerifyingPayment(true);
+
+      const statusResult = await pollCashfreeOrderStatus(cfOrder.orderId, 6, 2000);
+      setIsVerifyingPayment(false);
+
+      if (statusResult.paid || statusResult.orderStatus === 'PAID') {
         const newTxn: Donation = {
           id: `don-${Date.now()}`,
-          donorName: donorName || 'Generous Contributor',
-          donorEmail: donorEmail || 'donor@anandalok.org',
+          donorName: donorName.trim() || activeUser.name || 'Generous Contributor',
+          donorEmail: donorEmail.trim() || activeUser.email || 'donor@anandalok.org',
           donorPhone,
           causeId: 'unified-anandalok-fund',
           causeTitle: 'Anandalok Unified Social Welfare Fund (Durgapur)',
           amount,
-          paymentMethod: 'stripe',
-          transactionId: stripeRes.paymentIntentId,
-          stripePaymentIntentId: stripeRes.paymentIntentId,
-          stripeReceiptUrl: stripeRes.receiptUrl,
+          paymentMethod: 'cashfree',
+          transactionId: statusResult.bankReference || statusResult.cfPaymentId || `CF_${cfOrder.orderId}`,
+          cashfreeOrderId: cfOrder.orderId,
+          cashfreePaymentId: String(statusResult.cfPaymentId || cfOrder.cfOrderId || cfOrder.orderId),
+          cashfreePaymentSessionId: cfOrder.paymentSessionId,
           date: new Date().toISOString().split('T')[0],
           is80GClaimed: is80GRequested,
-          panNumber: is80GRequested ? panNumber || 'ABCDE1234F' : undefined
+          panNumber: is80GRequested ? panNumber || 'ABCDE1234F' : undefined,
         };
 
         onCompleteDonation(newTxn);
         setCompletedTxn(newTxn);
-        setIsProcessing(false);
         setStep('receipt');
-        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-      } catch (err: any) {
-        setPaymentError(err.message || 'Payment failed. Please verify credentials.');
-        setIsProcessing(false);
+        confetti({ particleCount: 110, spread: 75, origin: { y: 0.6 } });
+      } else {
+        setPaymentFailureInfo({
+          orderId: cfOrder.orderId,
+          status: statusResult.orderStatus,
+          reason: statusResult.failureReason || 'Payment could not be confirmed or was cancelled by user.',
+        });
+        setStep('failed');
       }
-      return;
+    } catch (err: any) {
+      console.error('Donation payment error:', err);
+      setIsProcessing(false);
+      setIsVerifyingPayment(false);
+      setPaymentError(err.message || 'Cashfree payment initiation failed. Please try again.');
     }
-
-    // Fallback for UPI or offline pledge
-    const newTxn: Donation = {
-      id: `don-${Date.now()}`,
-      donorName: donorName || 'Generous Contributor',
-      donorEmail: donorEmail || 'donor@anandalok.org',
-      donorPhone,
-      causeId: 'unified-anandalok-fund',
-      causeTitle: 'Anandalok Unified Social Welfare Fund (Durgapur)',
-      amount,
-      paymentMethod,
-      transactionId: `AL80G${Math.floor(100000 + Math.random() * 900000)}`,
-      date: new Date().toISOString().split('T')[0],
-      is80GClaimed: is80GRequested,
-      panNumber: is80GRequested ? panNumber || 'ABCDE1234F' : undefined
-    };
-
-    onCompleteDonation(newTxn);
-    setCompletedTxn(newTxn);
-    setStep('receipt');
-    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
   };
 
   return (
-    <GlassModal isOpen={isOpen} onClose={onClose} maxWidth="max-w-lg">
-      <div className="relative">
+    <GlassModal isOpen={isOpen} onClose={onClose} maxWidth="max-w-xl">
+      <div className="p-6">
         {step === 'details' && (
           <form onSubmit={handleProceedToPayment} className="space-y-4">
-            {/* Header */}
-            <div className="flex items-start justify-between pb-3 border-b border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+              <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center">
+                <Heart className="w-4 h-4 fill-amber-500" />
+              </div>
               <div>
-                <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-900 font-bold text-[11px] px-2.5 py-0.5 rounded-md border border-amber-200">
-                  <Heart className="w-3 h-3 text-amber-700 fill-amber-700" />
-                  <span>Anandalok Social Welfare Fund</span>
+                <h2 className="text-lg font-bold text-slate-900">Support Anandalok Foundation</h2>
+                <p className="text-xs text-slate-500">Every rupee directly funds children's nutrition, artisan tools & education</p>
+              </div>
+            </div>
+
+            {/* Donor Identity Bar */}
+            <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200/80 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-amber-200/70 text-amber-900 flex items-center justify-center font-bold text-xs">
+                  {donorName.charAt(0).toUpperCase() || <UserIcon className="w-4 h-4" />}
                 </div>
-                <h2 className="text-xl font-extrabold text-slate-900 mt-1.5">Make a Donation</h2>
-                <p className="text-xs text-slate-500">Empowering children, clothing drives & rural artisans in Bengal.</p>
+                <div>
+                  <p className="text-xs font-bold text-slate-800">{donorName}</p>
+                  <p className="text-[11px] text-slate-500">{donorEmail}</p>
+                </div>
               </div>
-              <span className="text-xs bg-emerald-50 text-emerald-800 font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border border-emerald-200 shrink-0">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> 80G Tax Benefit
-              </span>
-            </div>
-
-            {/* Purpose Banner */}
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/90 flex items-center gap-3 text-xs text-slate-800">
-              <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-900 flex items-center justify-center shrink-0">
-                <Heart className="w-4 h-4 text-rose-600 fill-rose-600" />
-              </div>
-              <div>
-                <p className="font-bold text-slate-900">Direct Field Impact</p>
-                <p className="text-[11px] text-slate-600">All contributions are transparently audited and allocated directly where needed most.</p>
+              <div className="flex items-center gap-1 text-[10px] text-emerald-800 font-bold bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-200">
+                <ShieldCheck className="w-3 h-3 text-emerald-700" />
+                <span>Verified Account</span>
               </div>
             </div>
 
-            {/* Amount Selector */}
+            {/* Donation Amount Presets */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs font-bold">
-                <span className="text-slate-700">Select Amount (₹ INR):</span>
-                <span className="text-slate-950 text-base font-black bg-slate-100 px-3 py-0.5 rounded-lg border border-slate-200">
-                  ₹{amount.toLocaleString()}
-                </span>
-              </div>
-
+              <label className="block text-xs font-bold text-slate-700">Select Contribution Amount (INR)</label>
               <div className="grid grid-cols-4 gap-2">
                 {[500, 1000, 2500, 5000].map((amt) => (
                   <button
                     key={amt}
                     type="button"
                     onClick={() => setAmount(amt)}
-                    className={`py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    className={`py-2 rounded-xl text-xs font-extrabold border transition-all cursor-pointer ${
                       amount === amt
-                        ? 'bg-slate-950 text-white shadow-xs border border-slate-950'
-                        : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-50 bg-white'
                     }`}
                   >
                     ₹{amt.toLocaleString()}
                   </button>
                 ))}
               </div>
-
-              <div className="relative">
-                <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">₹</span>
+              <div className="relative mt-2">
+                <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">₹</span>
                 <input
                   type="number"
-                  min="100"
-                  value={amount || ''}
+                  min="50"
+                  value={amount}
                   onChange={(e) => setAmount(Number(e.target.value))}
-                  className="w-full pl-7 pr-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400"
                   placeholder="Custom amount"
+                  className="w-full pl-7 pr-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  required
                 />
               </div>
             </div>
 
-            {/* Personal Info */}
-            <div className="space-y-2.5 pt-1">
-              <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Donor Details</h4>
-              
-              <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-slate-200/80 flex items-center justify-center text-slate-700 shrink-0 font-extrabold text-xs">
-                  <UserIcon className="w-4 h-4 text-slate-500" />
+            {/* Tax Exemption (80G) Section */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Receipt className="w-4 h-4 text-emerald-700" />
+                  <span className="text-xs font-extrabold text-slate-800">80G Tax Exemption Certificate</span>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-slate-900 truncate">{donorName}</span>
-                    <span className="text-[9px] font-extrabold uppercase tracking-widest bg-slate-200 text-slate-700 px-1 py-0.2 rounded shrink-0">Secured Session</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 truncate leading-tight">{donorEmail}</p>
-                </div>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  50% Tax Relief
+                </span>
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                <div>
-                  <label className="font-medium text-slate-700">Phone Number</label>
-                  <input
-                    type="tel"
-                    value={donorPhone}
-                    onChange={(e) => setDonorPhone(e.target.value)}
-                    placeholder="+91 98301 23456"
-                    className="w-full mt-1 p-2 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-medium text-slate-700">PAN Number (Optional for 80G)</label>
-                  <input
-                    type="text"
-                    value={panNumber}
-                    onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
-                    placeholder="ABCDE1234F"
-                    className="w-full mt-1 p-2 rounded-xl border border-slate-200 uppercase font-mono bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400"
-                  />
-                </div>
+              <p className="text-[11px] text-slate-600">
+                Under Section 80G of the Indian Income Tax Act, 50% of your donation is tax deductible. An official signed certificate will be issued immediately upon payment.
+              </p>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  PAN Number (Optional, for 80G Receipt)
+                </label>
+                <input
+                  type="text"
+                  maxLength={10}
+                  value={panNumber}
+                  onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
+                  placeholder="ABCDE1234F"
+                  className="w-full px-3 py-1.5 text-xs font-mono uppercase rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
+                />
               </div>
+            </div>
+
+            {/* Mobile Contact */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Contact Phone Number</label>
+              <input
+                type="tel"
+                value={donorPhone}
+                onChange={(e) => setDonorPhone(e.target.value)}
+                placeholder="+91 98765 43210"
+                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              />
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
+              className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <span>Proceed to Payment (₹{amount.toLocaleString()})</span>
+              <span>Continue to Cashfree Payment (₹{amount.toLocaleString()})</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
@@ -313,7 +298,12 @@ export const DonationModal: React.FC<DonationModalProps> = ({
           <div className="space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Payment Gateway</h2>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <span>Cashfree Payment Gateway</span>
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-violet-600 text-white px-2 py-0.5 rounded">
+                    Singular PG
+                  </span>
+                </h2>
                 <p className="text-xs text-slate-500">Contributing ₹{amount.toLocaleString()} to Anandalok Welfare Fund</p>
               </div>
               <button
@@ -325,193 +315,179 @@ export const DonationModal: React.FC<DonationModalProps> = ({
               </button>
             </div>
 
-            {/* Payment Method Tabs */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              {[
-                { id: 'stripe', label: 'Stripe Pay', icon: CreditCard, highlight: true },
-                { id: 'upi', label: 'UPI Scan', icon: QrCode },
-                { id: 'netbanking', label: 'Net Banking', icon: Building2 },
-                { id: 'offline_pledge', label: 'Clothes Pickup', icon: Truck }
-              ].map((method) => {
-                const Icon = method.icon;
-                return (
+            {/* Cashfree Singular Gateway Card */}
+            <div className="p-4 bg-gradient-to-br from-violet-50/80 via-white to-amber-50/40 rounded-2xl border border-violet-200 space-y-3.5 shadow-sm">
+              <div className="flex items-center justify-between border-b border-violet-100 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-violet-600 text-white flex items-center justify-center font-black text-sm shadow-xs">
+                    CF
+                  </div>
+                  <div>
+                    <span className="font-extrabold text-xs text-slate-900 block leading-tight">Cashfree Payments</span>
+                    <span className="text-[10px] text-slate-500">Production Payment Gateway (V3)</span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-full flex items-center gap-1 border border-emerald-200">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" /> RBI Compliant & 256-Bit SSL
+                </span>
+              </div>
+
+              {/* Supported Instruments through Cashfree */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-2">Preferred Instrument in Cashfree Gateway:</label>
+                <div className="grid grid-cols-3 gap-2">
                   <button
-                    key={method.id}
                     type="button"
-                    onClick={() => setPaymentMethod(method.id as any)}
-                    className={`p-2.5 rounded-xl border font-bold flex flex-col items-center gap-1.5 text-center transition-all cursor-pointer relative ${
-                      paymentMethod === method.id
-                        ? 'border-indigo-600 bg-indigo-950 text-white shadow-xs'
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50 bg-white'
+                    onClick={() => setSelectedChannel('upi')}
+                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1.5 ${
+                      selectedChannel === 'upi'
+                        ? 'border-violet-600 bg-violet-950 text-white shadow-xs'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
-                    <span>{method.label}</span>
-                    {method.highlight && (
-                      <span className="absolute -top-1.5 right-1.5 text-[8px] font-black uppercase bg-[#635BFF] text-white px-1.5 py-0.2 rounded-full">
-                        Official
-                      </span>
-                    )}
+                    <QrCode className="w-4 h-4 text-emerald-400" />
+                    <span className="text-[11px] font-bold">UPI / QR Scan</span>
+                    <span className="text-[9px] opacity-80">GPay, PhonePe, Paytm</span>
                   </button>
-                );
-              })}
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedChannel('card')}
+                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1.5 ${
+                      selectedChannel === 'card'
+                        ? 'border-violet-600 bg-violet-950 text-white shadow-xs'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <CreditCard className="w-4 h-4 text-amber-400" />
+                    <span className="text-[11px] font-bold">Cards</span>
+                    <span className="text-[9px] opacity-80">RuPay, Visa, Master</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedChannel('netbanking')}
+                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1.5 ${
+                      selectedChannel === 'netbanking'
+                        ? 'border-violet-600 bg-violet-950 text-white shadow-xs'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <Building2 className="w-4 h-4 text-sky-400" />
+                    <span className="text-[11px] font-bold">Net Banking</span>
+                    <span className="text-[9px] opacity-80">50+ Indian Banks</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Security info banner */}
+              <div className="p-3 bg-white/90 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-1.5">
+                <div className="flex items-center justify-between text-slate-800 font-bold">
+                  <span>Authorized Remittance:</span>
+                  <span className="text-violet-700 font-extrabold">Anandalok Welfare Foundation</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Contribution Amount:</span>
+                  <span className="font-mono font-black text-slate-900">₹{amount.toLocaleString()}.00</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>80G Certificate:</span>
+                  <span className="text-emerald-700 font-semibold">{panNumber ? `PAN: ${panNumber}` : 'Eligible for deduction'}</span>
+                </div>
+              </div>
+
+              {paymentError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-bold">
+                  {paymentError}
+                </div>
+              )}
+
+              {/* Verifying Payment State */}
+              {isVerifyingPayment && (
+                <div className="p-4 bg-violet-50 rounded-xl border border-violet-200 text-center space-y-2">
+                  <Loader2 className="w-6 h-6 text-violet-700 animate-spin mx-auto" />
+                  <h4 className="text-xs font-black text-slate-900">Verifying Contribution with Bank...</h4>
+                  <p className="text-[11px] text-slate-500">Please keep this window open while Cashfree Gateway confirms status.</p>
+                </div>
+              )}
             </div>
 
-            {/* Stripe Card Payment View */}
-            {paymentMethod === 'stripe' && (
-              <div className="p-4 bg-slate-50/90 rounded-2xl border border-indigo-200/80 space-y-3.5 shadow-xs">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
-                  <div className="flex items-center gap-2">
-                    {/* Official Stripe SVG Wordmark */}
-                    <svg className="h-4.5 w-auto text-[#635BFF]" viewBox="0 0 60 25" fill="currentColor">
-                      <path d="M59.64 14.28h-8.06c.19 1.93 1.6 2.55 3.2 2.55 1.64 0 2.96-.37 4.05-.95v2.81c-1.12.57-2.67.92-4.47.92-4.04 0-6.65-2.45-6.65-6.84 0-4.06 2.54-6.83 6.32-6.83 3.97 0 5.61 2.96 5.61 6.35v1.99zm-4.14-2.44c-.03-1.44-.87-2.34-2.22-2.34-1.33 0-2.27.9-2.43 2.34h4.65zM38.86 6.27h3.83v13.01h-3.83V6.27zm1.92-5.9c1.33 0 2.42 1.09 2.42 2.42 0 1.33-1.09 2.42-2.42 2.42-1.33 0-2.42-1.09-2.42-2.42 0-1.33 1.09-2.42 2.42-2.42zM33.4 8.78c-.83-.49-2.06-.88-3.41-.88-2.61 0-4.3 1.34-4.3 3.65 0 3.75 5.16 3.16 5.16 4.79 0 .63-.55 1.02-1.57 1.02-1.38 0-2.9-.6-3.87-1.22v3.13c1.16.54 2.65.86 3.99.86 2.76 0 4.67-1.34 4.67-3.76 0-4.04-5.18-3.32-5.18-4.83 0-.58.48-.91 1.37-.91 1.15 0 2.4.45 3.14.92V8.78zm-16.7 4.41c0-1.89-1.07-2.73-2.58-2.73-1.56 0-2.68.86-2.68 2.73 0 1.9 1.12 2.78 2.68 2.78 1.51 0 2.58-.88 2.58-2.78zm3.83-.02c0 4.19-2.67 6.81-6.41 6.81-1.3 0-2.49-.36-3.37-.97v4.61h-3.83V6.27h3.68v1.07c.88-.69 2.1-1.12 3.52-1.12 3.74 0 6.41 2.64 6.41 6.95zM4.77 12.01c0-.46.39-.75 1.08-.75.98 0 2.22.42 3.03.95V8.98C7.94 8.44 6.7 8.1 5.48 8.1 2.47 8.1.95 9.77.95 12.19c0 3.86 5.25 3.26 5.25 4.93 0 .58-.51.84-1.28.84-1.16 0-2.65-.54-3.72-1.2v3.29c1.22.54 2.62.87 3.87.87 3.17 0 4.99-1.52 4.99-4.01 0-4.14-5.29-3.41-5.29-4.9z"/>
-                    </svg>
-                    <span className="text-[11px] font-bold text-slate-600">Secure Payment Gateway</span>
-                  </div>
-                  <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 text-emerald-700" /> 256-Bit SSL
-                  </span>
-                </div>
-
-                <div className="space-y-2.5 text-xs">
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Card Number</label>
-                    <div className="relative">
-                      <CreditCard className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                      <input
-                        type="text"
-                        value={cardNumber}
-                        onChange={(e) => setCardNumber(e.target.value)}
-                        placeholder="4242 4242 4242 4242"
-                        className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">Expires</label>
-                      <input
-                        type="text"
-                        value={cardExp}
-                        onChange={(e) => setCardExp(e.target.value)}
-                        placeholder="MM/YY"
-                        className="w-full p-2 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono text-xs text-center focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">CVC / CVV</label>
-                      <input
-                        type="text"
-                        value={cardCvc}
-                        onChange={(e) => setCardCvc(e.target.value)}
-                        placeholder="123"
-                        className="w-full p-2 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono text-xs text-center focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">Postal Code</label>
-                      <input
-                        type="text"
-                        value={cardZip}
-                        onChange={(e) => setCardZip(e.target.value)}
-                        placeholder="PIN"
-                        className="w-full p-2 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono text-xs text-center focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Auto-fill Stripe Test Card */}
-                  <div className="flex items-center justify-between pt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCardNumber(TEST_CARDS.VISA_SUCCESS.number);
-                        setCardExp(TEST_CARDS.VISA_SUCCESS.exp);
-                        setCardCvc(TEST_CARDS.VISA_SUCCESS.cvc);
-                        setCardZip(TEST_CARDS.VISA_SUCCESS.zip);
-                      }}
-                      className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 cursor-pointer flex items-center gap-1"
-                    >
-                      <Sparkles className="w-3 h-3" /> Auto-fill Stripe 4242 Test Card
-                    </button>
-                    <span className="text-[10px] text-slate-500 font-medium">PCI-DSS Level 1</span>
-                  </div>
-
-                  {paymentError && (
-                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
-                      {paymentError}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* UPI View */}
-            {paymentMethod === 'upi' && (
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center space-y-3 shadow-2xs">
-                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">UPI Instant Scan & Pay</span>
-                <div className="w-32 h-32 bg-white p-2 rounded-2xl mx-auto border border-slate-300 shadow-xs flex items-center justify-center">
-                  <div className="w-full h-full border-2 border-slate-950 p-2 flex flex-col items-center justify-between bg-white text-slate-950 font-mono text-[9px]">
-                    <div className="w-full flex justify-between">
-                      <div className="w-5 h-5 bg-slate-950 rounded-xs" />
-                      <div className="w-5 h-5 bg-slate-950 rounded-xs" />
-                    </div>
-                    <p className="font-bold">anandalok@upi</p>
-                    <p className="font-extrabold text-slate-900 text-xs">₹{amount}</p>
-                    <div className="w-full flex justify-between">
-                      <div className="w-5 h-5 bg-slate-950 rounded-xs" />
-                      <div className="w-3 h-3 bg-rose-600 rounded-xs" />
-                    </div>
-                  </div>
-                </div>
-                <p className="text-xs text-slate-600 font-medium">Accepts Google Pay, PhonePe, Paytm, BHIM</p>
-              </div>
-            )}
-
-            {paymentMethod === 'netbanking' && (
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5 text-xs">
-                <p className="font-bold text-slate-800">Direct Bank Account Transfer</p>
-                <div className="p-3 bg-white rounded-lg border border-slate-200 font-mono text-[11px] space-y-1">
-                  <p>Bank: State Bank of India (Durgapur Branch)</p>
-                  <p>A/C Name: Anandalok Welfare Foundation</p>
-                  <p>A/C No: 398200192840</p>
-                  <p>IFSC: SBIN0001234</p>
-                </div>
-              </div>
-            )}
-
-            {paymentMethod === 'offline_pledge' && (
-              <div className="p-4 bg-amber-50/80 rounded-xl border border-amber-200 text-xs text-slate-800 space-y-1">
-                <p className="font-bold text-slate-900">Doorstep Clothing Drive Pickup</p>
-                <p className="text-slate-600">Our volunteer team will reach out to schedule a doorstep collection for gently used clothes and supplies.</p>
-              </div>
-            )}
-
+            {/* Action button */}
             <button
               type="button"
-              disabled={isProcessing}
-              onClick={handleFinalPay}
-              className={`w-full py-3 rounded-xl font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                paymentMethod === 'stripe'
-                  ? 'bg-[#635BFF] hover:bg-[#5349e5] text-white'
-                  : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-              }`}
+              disabled={isProcessing || isVerifyingPayment}
+              onClick={handleFinalCashfreePay}
+              className="w-full py-3.5 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer bg-violet-700 hover:bg-violet-800 text-white disabled:opacity-70"
             >
               {isProcessing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Processing with Stripe...</span>
+                  <span>Connecting with Cashfree Gateway...</span>
+                </>
+              ) : isVerifyingPayment ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Verifying Transaction...</span>
                 </>
               ) : (
                 <>
-                  <CheckCircle className="w-4 h-4" />
-                  <span>
-                    {paymentMethod === 'stripe' ? 'Pay via Stripe' : 'Confirm Contribution'} (₹{amount.toLocaleString()})
-                  </span>
+                  <Zap className="w-4 h-4 text-amber-300" />
+                  <span>Pay ₹{amount.toLocaleString()} via Cashfree Payments</span>
                 </>
               )}
             </button>
+          </div>
+        )}
+
+        {/* STEP: PAYMENT FAILED / CANCELLED */}
+        {step === 'failed' && paymentFailureInfo && (
+          <div className="space-y-4 text-center py-2">
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto border border-rose-300">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+
+            <div className="space-y-1">
+              <span className="inline-block text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 px-2.5 py-0.5 rounded-full border border-rose-200 mb-1">
+                Status: {paymentFailureInfo.status}
+              </span>
+              <h2 className="text-xl font-black text-slate-900">Donation Not Completed</h2>
+              <p className="text-xs text-rose-700 max-w-sm mx-auto leading-relaxed">
+                {paymentFailureInfo.reason}
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-left space-y-2 text-xs">
+              <div className="flex justify-between border-b border-slate-200 pb-2">
+                <span className="text-slate-500">Cashfree Order Ref:</span>
+                <span className="font-mono font-bold text-slate-800">{paymentFailureInfo.orderId}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-200 pb-2">
+                <span className="text-slate-500">Contribution Amount:</span>
+                <span className="font-black text-slate-900">₹{amount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Bank Debit Notice:</span>
+                <span className="text-slate-700">If money was debited, your bank will auto-refund within 24-48 hours.</span>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => handleFinalCashfreePay()}
+                className="flex-1 py-3 rounded-xl bg-violet-700 hover:bg-violet-800 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-300" />
+                <span>Retry Contribution via Cashfree</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep('details')}
+                className="px-4 py-3 rounded-xl border border-slate-300 font-bold text-xs hover:bg-slate-100 cursor-pointer"
+              >
+                Edit Details
+              </button>
+            </div>
           </div>
         )}
 
@@ -521,53 +497,49 @@ export const DonationModal: React.FC<DonationModalProps> = ({
               <CheckCircle className="w-6 h-6" />
             </div>
 
-            <div>
-              <h2 className="text-xl font-extrabold text-slate-900">Thank You For Your Support!</h2>
-              <p className="text-xs text-slate-600 mt-0.5">
-                Receipt Reference: <strong className="text-slate-900 font-mono">{completedTxn.transactionId}</strong>
+            <div className="space-y-1">
+              <span className="inline-block text-[10px] font-black uppercase tracking-wider bg-violet-100 text-violet-800 px-2.5 py-0.5 rounded-full border border-violet-200 mb-1">
+                Cashfree Verified Transaction
+              </span>
+              <h2 className="text-xl font-black text-slate-900">Contribution Confirmed!</h2>
+              <p className="text-xs text-slate-600">
+                Thank you, <span className="font-bold text-slate-900">{completedTxn.donorName}</span>! Your generosity supports vital welfare projects in Durgapur.
               </p>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-left text-xs text-slate-800 space-y-2.5">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                <div>
-                  <h3 className="font-bold text-slate-900 text-sm">Anandalok Welfare Organization</h3>
-                  <p className="text-[10px] text-slate-500">80G Tax Exemption Certificate</p>
-                </div>
-                <Receipt className="w-5 h-5 text-slate-700" />
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-left space-y-2 text-xs">
+              <div className="flex justify-between border-b border-slate-200 pb-2">
+                <span className="text-slate-500">Transaction Ref:</span>
+                <span className="font-mono font-bold text-slate-800">{completedTxn.transactionId}</span>
               </div>
-
-              <div className="grid grid-cols-2 gap-2 text-slate-700">
-                <div>
-                  <p className="text-[10px] text-slate-400">Donor Name:</p>
-                  <p className="font-bold text-slate-900">{completedTxn.donorName}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-400">Amount Paid:</p>
-                  <p className="font-bold text-slate-900 text-sm">₹{completedTxn.amount.toLocaleString()}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-[10px] text-slate-400">Fund Allocated To:</p>
-                  <p className="font-bold text-slate-900">Anandalok Social Welfare & Artisan Fund</p>
-                </div>
-                {completedTxn.stripePaymentIntentId && (
-                  <div className="col-span-2 p-2 bg-indigo-50/80 rounded-lg border border-indigo-200 text-[11px] text-indigo-900 flex items-center justify-between">
-                    <div>
-                      <span className="font-bold">Verified by Stripe Payment Gateway</span>
-                      <p className="font-mono text-[10px] text-indigo-700">{completedTxn.stripePaymentIntentId}</p>
-                    </div>
-                    <span className="text-[9px] font-black uppercase bg-[#635BFF] text-white px-2 py-0.5 rounded">
-                      Captured
-                    </span>
-                  </div>
-                )}
+              <div className="flex justify-between border-b border-slate-200 pb-2">
+                <span className="text-slate-500">Cashfree Order ID:</span>
+                <span className="font-mono font-bold text-violet-700">{completedTxn.cashfreeOrderId}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-200 pb-2">
+                <span className="text-slate-500">Payment Gateway:</span>
+                <span className="font-extrabold text-violet-800">Cashfree Payments (Production)</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-200 pb-2">
+                <span className="text-slate-500">Amount Paid:</span>
+                <span className="font-black text-slate-900">₹{completedTxn.amount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-200 pb-2">
+                <span className="text-slate-500">Date:</span>
+                <span className="font-medium text-slate-800">{completedTxn.date}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">80G Status:</span>
+                <span className="text-emerald-700 font-bold">
+                  {completedTxn.panNumber ? `Claimed (PAN: ${completedTxn.panNumber})` : 'Eligible for 50% Tax Exemption'}
+                </span>
               </div>
             </div>
 
             <div className="flex gap-2">
               <button
                 onClick={() => {
-                  const content = `ANANDALOK DURGAPUR - 80G TAX EXEMPTION RECEIPT\nReference: ${completedTxn.transactionId}\nPayment Gateway: ${completedTxn.stripePaymentIntentId ? 'Stripe Gateway' : completedTxn.paymentMethod}\nDonor Name: ${completedTxn.donorName}\nAmount Paid: ₹${completedTxn.amount}\nDate: ${completedTxn.date}\nStatus: Verified Tax Exemption Eligible`;
+                  const content = `ANANDALOK DURGAPUR - 80G TAX EXEMPTION RECEIPT\nReference: ${completedTxn.transactionId}\nPayment Gateway: Cashfree Payments Gateway\nCashfree Order ID: ${completedTxn.cashfreeOrderId}\nDonor Name: ${completedTxn.donorName}\nAmount Paid: ₹${completedTxn.amount}\nDate: ${completedTxn.date}\nStatus: Verified Tax Exemption Eligible`;
                   const blob = new Blob([content], { type: 'text/plain' });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
@@ -584,7 +556,7 @@ export const DonationModal: React.FC<DonationModalProps> = ({
               </button>
               <button
                 onClick={onClose}
-                className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs hover:bg-slate-200 cursor-pointer"
+                className="px-4 py-2.5 rounded-xl border border-slate-300 font-bold text-xs hover:bg-slate-100 cursor-pointer"
               >
                 Close
               </button>

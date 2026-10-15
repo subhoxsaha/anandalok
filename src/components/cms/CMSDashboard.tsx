@@ -582,9 +582,14 @@ export const CMSDashboard: React.FC<CMSDashboardProps> = ({
                       </div>
 
                       <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-4 items-center">
-                        <div className="text-xs">
+                        <div className="text-xs flex items-center gap-1.5">
                           <span className="text-slate-500">Payment: </span>
                           <strong className="font-bold text-slate-800 uppercase">{order.paymentMethod}</strong>
+                          {order.cashfreeOrderId && (
+                            <span className="text-[10px] bg-violet-100 text-violet-800 font-mono px-2 py-0.5 rounded font-bold">
+                              CF: {order.cashfreeOrderId}
+                            </span>
+                          )}
                         </div>
                         <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
                         <div className="text-xs">
@@ -1057,8 +1062,15 @@ export const CMSDashboard: React.FC<CMSDashboardProps> = ({
                           <td className="p-4 font-black text-slate-900 text-sm">
                             ₹{d.amount.toLocaleString()}
                           </td>
-                          <td className="p-4 uppercase font-extrabold text-[10px] text-slate-500">
-                            {d.paymentMethod}
+                          <td className="p-4">
+                            <span className="uppercase font-extrabold text-[10px] text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                              {d.paymentMethod}
+                            </span>
+                            {d.cashfreeOrderId && (
+                              <div className="text-[9px] font-mono text-violet-700 mt-1 truncate max-w-[130px]" title={d.cashfreeOrderId}>
+                                {d.cashfreeOrderId}
+                              </div>
+                            )}
                           </td>
                           <td className="p-4">
                             <div className="font-semibold text-slate-800 text-[11px]">

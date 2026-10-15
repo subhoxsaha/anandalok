@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShoppingBag, Trash2, ShieldCheck, Heart, ArrowRight, CheckCircle, 
   MapPin, Plus, Minus, Truck, Sparkles, CreditCard, QrCode, Tag, ArrowLeft,
-  Package, Clock, Lock, Edit2, AlertCircle, Phone, User, Mail, Loader2
+  Package, Clock, Lock, Edit2, AlertCircle, Phone, User, Mail, Loader2,
+  Building2, Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArtisanProduct, ArtisanOrder, User as UserType } from '../../types';
 import confetti from 'canvas-confetti';
 import { saveOrder } from '../../lib/storage';
-import { processStripePayment, TEST_CARDS } from '../../lib/stripeService';
+import { createCashfreeOrder, verifyCashfreeOrder, launchCashfreeCheckout, pollCashfreeOrderStatus } from '../../lib/cashfreeService';
 
 interface CartItem {
   product: ArtisanProduct;
@@ -50,20 +51,24 @@ export const ExtendedCheckoutPage: React.FC<ExtendedCheckoutPageProps> = ({
   const [landmark, setLandmark] = useState('');
   const [deliveryError, setDeliveryError] = useState('');
 
-  // Payment Form State
-  const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'upi' | 'cod' | 'card'>('stripe');
+  // Payment Form State - Cashfree as Singular Payment Gateway (No COD)
+  const [paymentMethod] = useState<'cashfree'>('cashfree');
+  const [selectedChannel, setSelectedChannel] = useState<'upi' | 'card' | 'netbanking'>('upi');
   const [couponCode, setCouponCode] = useState('');
   const [discountApplied, setDiscountApplied] = useState(false);
   const [couponError, setCouponError] = useState('');
   const [couponSuccess, setCouponSuccess] = useState('');
 
-  // Stripe card states
-  const [cardNumber, setCardNumber] = useState(TEST_CARDS.VISA_SUCCESS.number);
-  const [cardExp, setCardExp] = useState(TEST_CARDS.VISA_SUCCESS.exp);
-  const [cardCvc, setCardCvc] = useState(TEST_CARDS.VISA_SUCCESS.cvc);
-  const [cardZip, setCardZip] = useState(TEST_CARDS.VISA_SUCCESS.zip);
-  const [isProcessingStripe, setIsProcessingStripe] = useState(false);
-  const [stripeError, setStripeError] = useState('');
+  // Cashfree processing states
+  const [isProcessingCashfree, setIsProcessingCashfree] = useState(false);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  const [paymentFailureInfo, setPaymentFailureInfo] = useState<{
+    orderId: string;
+    cfOrderId?: string | number;
+    reason: string;
+    status: string;
+  } | null>(null);
+  const [cashfreeError, setCashfreeError] = useState('');
 
   // Pre-fill user details when currentUser changes
   useEffect(() => {
@@ -147,86 +152,91 @@ export const ExtendedCheckoutPage: React.FC<ExtendedCheckoutPageProps> = ({
     if (elem) elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  // Step 3: Confirm & Place Order
-  const handlePlaceOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Step 3: Confirm & Place Order via Cashfree Payments
+  const handlePlaceOrder = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (isGuest) {
       onOpenAuth();
       return;
     }
     if (cart.length === 0) return;
-    setStripeError('');
+    setCashfreeError('');
+    setPaymentFailureInfo(null);
+    setIsProcessingCashfree(true);
 
     const fullAddressString = `${customerAddress.trim()}${landmark ? `, Near ${landmark.trim()}` : ''}, ${city.trim()} - ${pincode.trim()}`;
 
-    let stripePaymentIntentId: string | undefined;
-    let stripeReceiptUrl: string | undefined;
+    try {
+      // 1. Create real Cashfree Order session on backend
+      const cfOrder = await createCashfreeOrder({
+        amount: total,
+        customerName: customerName.trim() || currentUser.name || 'Valued Patron',
+        customerEmail: customerEmail.trim() || currentUser.email || 'customer@anandalok.org',
+        customerPhone: customerPhone.trim() || '9876543210',
+        note: `Anandalok Artisan Craft Order (${cart.length} items)`,
+        returnUrl: `${window.location.origin}/?tab=marketplace&checkout=success&payment_id={order_id}`,
+      });
 
-    if (paymentMethod === 'stripe' || paymentMethod === 'card') {
-      setIsProcessingStripe(true);
-      try {
-        const stripeRes = await processStripePayment(
-          {
-            amount: total,
-            donorOrCustomerName: customerName.trim(),
-            email: customerEmail.trim() || currentUser.email || 'customer@anandalok.org',
-            description: `Artisan Marketplace Order - ${cart.length} craft items`
-          },
-          {
-            cardNumber,
-            expMonthYear: cardExp,
-            cvc: cardCvc,
-            zipCode: cardZip
-          }
-        );
+      // 2. Launch Cashfree Modal Checkout
+      await launchCashfreeCheckout(cfOrder.paymentSessionId);
 
-        if (!stripeRes.success) {
-          setStripeError(stripeRes.errorMessage || 'Stripe card authorization failed. Please verify credentials.');
-          setIsProcessingStripe(false);
-          return;
-        }
+      // 3. Enter Payment Verification State (polling gateway & bank)
+      setIsProcessingCashfree(false);
+      setIsVerifyingPayment(true);
 
-        stripePaymentIntentId = stripeRes.paymentIntentId;
-        stripeReceiptUrl = stripeRes.receiptUrl;
-      } catch (err: any) {
-        setStripeError(err.message || 'Payment failed. Please try again.');
-        setIsProcessingStripe(false);
-        return;
+      const statusResult = await pollCashfreeOrderStatus(cfOrder.orderId, 6, 2000);
+      setIsVerifyingPayment(false);
+
+      // 4. Branch strictly based on real payment status from Cashfree
+      if (statusResult.paid || statusResult.orderStatus === 'PAID') {
+        const newOrder: ArtisanOrder = {
+          id: `ord-${Date.now()}`,
+          customerName: customerName.trim() || currentUser.name || 'Valued Patron',
+          customerEmail: customerEmail.trim() || currentUser.email || 'customer@anandalok.org',
+          customerPhone: customerPhone.trim() || '9876543210',
+          customerAddress: fullAddressString,
+          items: cart.map(item => ({
+            productId: item.product.id,
+            productTitle: item.product.title,
+            price: item.product.price,
+            quantity: item.quantity,
+            imageUrl: item.product.images[0]
+          })),
+          subtotal,
+          discount,
+          deliveryFee,
+          total,
+          paymentMethod: 'cashfree',
+          date: new Date().toISOString().split('T')[0],
+          status: 'pending',
+          cashfreeOrderId: cfOrder.orderId,
+          cashfreePaymentId: String(statusResult.cfPaymentId || cfOrder.cfOrderId || cfOrder.orderId),
+          cashfreePaymentSessionId: cfOrder.paymentSessionId,
+        };
+
+        saveOrder(newOrder);
+        setPlacedOrder(newOrder);
+        setActiveStep(4);
+        confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
+        onClearCart();
+
+        const elem = document.getElementById('step-4-confirmation');
+        if (elem) elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        // Payment was not completed, cancelled, or declined by bank
+        setPaymentFailureInfo({
+          orderId: cfOrder.orderId,
+          cfOrderId: statusResult.cfOrderId,
+          status: statusResult.orderStatus,
+          reason: statusResult.failureReason || 'Payment could not be completed or was cancelled by user.',
+        });
       }
-      setIsProcessingStripe(false);
+    } catch (err: any) {
+      console.error('Order checkout error:', err);
+      setIsProcessingCashfree(false);
+      setIsVerifyingPayment(false);
+      setCashfreeError(err.message || 'Payment initiation failed. Please check your network and try again.');
     }
-
-    const newOrder: ArtisanOrder = {
-      id: `ord-${Date.now()}`,
-      customerName: customerName.trim(),
-      customerPhone: customerPhone.trim(),
-      customerAddress: fullAddressString,
-      items: cart.map(item => ({
-        productId: item.product.id,
-        productTitle: item.product.title,
-        price: item.product.price,
-        quantity: item.quantity,
-        imageUrl: item.product.images[0]
-      })),
-      subtotal,
-      discount,
-      deliveryFee,
-      total,
-      paymentMethod,
-      date: new Date().toISOString().split('T')[0],
-      status: 'pending',
-      stripePaymentIntentId,
-      stripeReceiptUrl
-    };
-
-    saveOrder(newOrder);
-    setPlacedOrder(newOrder);
-    setActiveStep(4);
-    confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
-    onClearCart();
-
-    const elem = document.getElementById('step-4-confirmation');
-    if (elem) elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
@@ -811,172 +821,205 @@ export const ExtendedCheckoutPage: React.FC<ExtendedCheckoutPageProps> = ({
                     <p className="text-[10px] text-slate-500">Use code <span className="font-bold text-amber-800">ANANDALOK10</span> to get 10% instant artisan discount!</p>
                   </div>
 
-                  {/* Payment Selection Options */}
-                  <div className="space-y-3">
-                    <p className="text-xs font-extrabold text-slate-800">Select Payment Option:</p>
-
-                    {/* Stripe Card Option */}
-                    <div 
-                      onClick={() => setPaymentMethod('stripe')}
-                      className={`p-4 rounded-xl border cursor-pointer transition-all flex flex-col gap-3 ${
-                        paymentMethod === 'stripe' ? 'border-[#635BFF] bg-indigo-50/30 ring-2 ring-[#635BFF]/20 shadow-xs' : 'border-slate-200 bg-white hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <input type="radio" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')} className="mt-1 accent-[#635BFF]" />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <span className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
-                              <CreditCard className="w-4 h-4 text-[#635BFF]" />
-                              <span>Credit / Debit Card (Powered by Stripe)</span>
-                            </span>
-                            <span className="text-[10px] font-black uppercase tracking-wider text-white bg-[#635BFF] px-2 py-0.5 rounded">
-                              Official Stripe
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5">Secure 256-bit encrypted checkout. Visa, Mastercard, RuPay, Amex accepted worldwide.</p>
-                        </div>
-                      </div>
-
-                      {/* Stripe Inline Card Elements */}
-                      {paymentMethod === 'stripe' && (
-                        <div className="mt-2 pt-3 border-t border-indigo-100 space-y-3 bg-white p-3.5 rounded-xl border border-indigo-200/80">
-                          <div>
-                            <label className="block text-[11px] font-bold text-slate-700 mb-1">Card Number</label>
-                            <div className="relative">
-                              <CreditCard className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                              <input
-                                type="text"
-                                value={cardNumber}
-                                onChange={(e) => setCardNumber(e.target.value)}
-                                placeholder="4242 4242 4242 4242"
-                                className="w-full pl-9 pr-3 py-2 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#635BFF] focus:outline-none bg-slate-50/50"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-2">
-                            <div>
-                              <label className="block text-[11px] font-bold text-slate-700 mb-1">Expires</label>
-                              <input
-                                type="text"
-                                value={cardExp}
-                                onChange={(e) => setCardExp(e.target.value)}
-                                placeholder="MM/YY"
-                                className="w-full p-2 text-xs font-mono text-center border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#635BFF] focus:outline-none bg-slate-50/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[11px] font-bold text-slate-700 mb-1">CVC / CVV</label>
-                              <input
-                                type="text"
-                                value={cardCvc}
-                                onChange={(e) => setCardCvc(e.target.value)}
-                                placeholder="123"
-                                className="w-full p-2 text-xs font-mono text-center border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#635BFF] focus:outline-none bg-slate-50/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[11px] font-bold text-slate-700 mb-1">PIN / ZIP</label>
-                              <input
-                                type="text"
-                                value={cardZip}
-                                onChange={(e) => setCardZip(e.target.value)}
-                                placeholder="PIN"
-                                className="w-full p-2 text-xs font-mono text-center border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#635BFF] focus:outline-none bg-slate-50/50"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCardNumber(TEST_CARDS.VISA_SUCCESS.number);
-                                setCardExp(TEST_CARDS.VISA_SUCCESS.exp);
-                                setCardCvc(TEST_CARDS.VISA_SUCCESS.cvc);
-                                setCardZip(TEST_CARDS.VISA_SUCCESS.zip);
-                              }}
-                              className="text-[11px] font-bold text-[#635BFF] hover:underline cursor-pointer flex items-center gap-1"
-                            >
-                              <Sparkles className="w-3 h-3" /> Auto-fill Stripe 4242 Test Card
-                            </button>
-                            <span className="text-[10px] text-slate-400 font-semibold">PCI DSS Level 1 Certified</span>
-                          </div>
-
-                          {stripeError && (
-                            <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg border border-rose-200">
-                              {stripeError}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* UPI Option */}
-                    <div 
-                      onClick={() => setPaymentMethod('upi')}
-                      className={`p-4 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
-                        paymentMethod === 'upi' ? 'border-amber-500 bg-amber-50/40 ring-1 ring-amber-400' : 'border-slate-200 bg-white hover:border-slate-300'
-                      }`}
-                    >
-                      <input type="radio" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} className="mt-1" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
-                            <QrCode className="w-4 h-4 text-emerald-600" />
-                            <span>Instant UPI / QR Code (Google Pay, PhonePe, Paytm)</span>
-                          </span>
-                          <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Fastest</span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 mt-0.5">Scan simulated QR code or pay directly to anandalok@upi</p>
-                      </div>
-                    </div>
-
-                    {/* COD Option */}
-                    <div 
-                      onClick={() => setPaymentMethod('cod')}
-                      className={`p-4 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
-                        paymentMethod === 'cod' ? 'border-amber-500 bg-amber-50/40 ring-1 ring-amber-400' : 'border-slate-200 bg-white hover:border-slate-300'
-                      }`}
-                    >
-                      <input type="radio" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} className="mt-1" />
-                      <div className="flex-1 min-w-0">
-                        <span className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
-                          <Truck className="w-4 h-4 text-amber-700" />
-                          <span>Cash on Delivery (COD)</span>
+                  {/* Cashfree Payments - Singular Payment Gateway (No COD) */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-extrabold text-slate-800 flex items-center gap-2">
+                        <span>Singular Payment Gateway:</span>
+                        <span className="text-[10px] font-black uppercase tracking-wider bg-violet-600 text-white px-2 py-0.5 rounded">
+                          Cashfree Payments
                         </span>
-                        <p className="text-[11px] text-slate-500 mt-0.5">Pay in cash directly to the delivery person upon arrival</p>
+                      </p>
+                      <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> RBI Compliant & 256-Bit SSL
+                      </span>
+                    </div>
+
+                    {/* Cashfree Main Gateway Card */}
+                    <div className="p-4 sm:p-5 rounded-2xl border-2 border-violet-200 bg-gradient-to-br from-violet-50/70 via-white to-amber-50/30 shadow-sm space-y-4">
+                      <div className="flex items-start justify-between gap-3 border-b border-violet-100 pb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-violet-600 text-white flex items-center justify-center font-black text-sm shadow-xs">
+                            CF
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-sm text-slate-900">Cashfree Payment Gateway</span>
+                              <span className="text-[9px] font-extrabold uppercase bg-violet-100 text-violet-800 px-2 py-0.5 rounded">
+                                Production V3
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              Certified payment processing for Bengal women artisan welfare. Zero Cash on Delivery required.
+                            </p>
+                          </div>
+                        </div>
                       </div>
+
+                      {/* Payment Instruments Inside Cashfree */}
+                      <div className="space-y-2">
+                        <label className="block text-[11px] font-bold text-slate-700">Select Preferred Channel in Cashfree:</label>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedChannel('upi')}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                              selectedChannel === 'upi'
+                                ? 'border-violet-600 bg-violet-950 text-white shadow-xs'
+                                : 'border-slate-200 bg-white hover:border-slate-300 text-slate-700'
+                            }`}
+                          >
+                            <QrCode className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                            <div className="min-w-0">
+                              <span className="font-bold text-xs block leading-tight">UPI / QR Code</span>
+                              <span className={`text-[10px] block mt-0.5 ${selectedChannel === 'upi' ? 'text-violet-200' : 'text-slate-400'}`}>
+                                GPay, PhonePe, Paytm
+                              </span>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setSelectedChannel('card')}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                              selectedChannel === 'card'
+                                ? 'border-violet-600 bg-violet-950 text-white shadow-xs'
+                                : 'border-slate-200 bg-white hover:border-slate-300 text-slate-700'
+                            }`}
+                          >
+                            <CreditCard className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                            <div className="min-w-0">
+                              <span className="font-bold text-xs block leading-tight">Credit / Debit Card</span>
+                              <span className={`text-[10px] block mt-0.5 ${selectedChannel === 'card' ? 'text-violet-200' : 'text-slate-400'}`}>
+                                RuPay, Visa, Mastercard
+                              </span>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setSelectedChannel('netbanking')}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                              selectedChannel === 'netbanking'
+                                ? 'border-violet-600 bg-violet-950 text-white shadow-xs'
+                                : 'border-slate-200 bg-white hover:border-slate-300 text-slate-700'
+                            }`}
+                          >
+                            <Building2 className="w-4 h-4 text-sky-400 mt-0.5 shrink-0" />
+                            <div className="min-w-0">
+                              <span className="font-bold text-xs block leading-tight">Net Banking</span>
+                              <span className={`text-[10px] block mt-0.5 ${selectedChannel === 'netbanking' ? 'text-violet-200' : 'text-slate-400'}`}>
+                                50+ Top Indian Banks
+                              </span>
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Remittance & Protection Callout */}
+                      <div className="p-3 bg-white/95 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                        <div className="flex items-center justify-between font-bold text-slate-800">
+                          <span>Beneficiary Artisan Guild:</span>
+                          <span className="text-violet-700">Anandalok Welfare Foundation (Durgapur)</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Total Payable Amount:</span>
+                          <span className="font-mono font-black text-slate-900">₹{total.toLocaleString()}.00</span>
+                        </div>
+                      </div>
+
+                      {cashfreeError && (
+                        <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                          {cashfreeError}
+                        </p>
+                      )}
                     </div>
                   </div>
 
+                  {/* Payment Verification Spinner State */}
+                  {isVerifyingPayment && (
+                    <div className="p-6 bg-violet-50/80 rounded-2xl border-2 border-violet-300 text-center space-y-3 shadow-xs">
+                      <Loader2 className="w-8 h-8 text-violet-700 animate-spin mx-auto" />
+                      <h4 className="text-sm font-black text-slate-900">Verifying Payment with Bank...</h4>
+                      <p className="text-xs text-slate-600 max-w-sm mx-auto">
+                        Please keep this window open. Cashfree Gateway is confirming your transaction status with the issuing bank.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Payment Failed / Dropped State */}
+                  {paymentFailureInfo && !isVerifyingPayment && (
+                    <div className="p-5 bg-rose-50/90 rounded-2xl border-2 border-rose-300 space-y-3.5 shadow-xs">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 border border-rose-200">
+                          <AlertCircle className="w-5 h-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <h4 className="text-sm font-black text-rose-950">Payment Not Completed</h4>
+                            <span className="text-[10px] font-extrabold uppercase bg-rose-200 text-rose-900 px-2 py-0.5 rounded">
+                              {paymentFailureInfo.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-rose-800 mt-1 leading-relaxed">
+                            {paymentFailureInfo.reason}
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-1 font-mono">
+                            Gateway Order ID: {paymentFailureInfo.orderId}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-rose-200 flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => handlePlaceOrder()}
+                          className="px-5 py-2.5 bg-violet-700 hover:bg-violet-800 text-white text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Retry Payment via Cashfree</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPaymentFailureInfo(null);
+                            setActiveStep(1);
+                          }}
+                          className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                        >
+                          <span>Review Cart Items</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Final Action Button */}
                   <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-4">
-                    <div className="text-xs text-slate-500 flex items-center gap-1">
+                    <div className="text-xs text-slate-500 flex items-center gap-1.5">
                       <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                      <span>Direct Artisan Remittance</span>
+                      <span>Direct Remittance to Bengal Artisans</span>
                     </div>
 
                     <button
-                      disabled={isProcessingStripe}
-                      onClick={handlePlaceOrder}
-                      className={`inline-flex items-center gap-2 font-black text-sm px-7 py-3.5 rounded-xl border shadow-md hover:shadow-lg transition-all cursor-pointer ${
-                        paymentMethod === 'stripe'
-                          ? 'bg-[#635BFF] hover:bg-[#5249e0] text-white border-indigo-700'
-                          : 'bg-[#FEDC00] hover:bg-amber-400 text-slate-950 border-amber-300'
-                      }`}
+                      disabled={isProcessingCashfree || isVerifyingPayment}
+                      onClick={() => handlePlaceOrder()}
+                      className="inline-flex items-center gap-2 font-black text-sm px-7 py-3.5 rounded-xl border shadow-md hover:shadow-lg transition-all cursor-pointer bg-violet-700 hover:bg-violet-800 text-white border-violet-800 disabled:opacity-70"
                     >
-                      {isProcessingStripe ? (
+                      {isProcessingCashfree ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Processing with Stripe...</span>
+                          <span>Connecting to Cashfree...</span>
+                        </>
+                      ) : isVerifyingPayment ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Verifying Payment...</span>
                         </>
                       ) : (
                         <>
-                          <Sparkles className="w-4 h-4" />
+                          <Zap className="w-4 h-4 text-amber-300" />
                           <span>
-                            {paymentMethod === 'stripe' ? 'Pay with Stripe' : 'Confirm & Place Order'} (₹{total.toLocaleString()})
+                            Pay ₹{total.toLocaleString()} via Cashfree Payments
                           </span>
                         </>
                       )}
@@ -1007,10 +1050,10 @@ export const ExtendedCheckoutPage: React.FC<ExtendedCheckoutPageProps> = ({
                     <span className="inline-block bg-slate-100 text-slate-800 text-xs font-mono font-bold px-3 py-1 rounded-full border border-slate-300">
                       Order ID: {placedOrder.id}
                     </span>
-                    {placedOrder.stripePaymentIntentId && (
-                      <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-900 text-xs font-mono font-bold px-3 py-1 rounded-full border border-indigo-200">
-                        <ShieldCheck className="w-3.5 h-3.5 text-[#635BFF]" />
-                        Stripe Txn: {placedOrder.stripePaymentIntentId}
+                    {placedOrder.cashfreeOrderId && (
+                      <span className="inline-flex items-center gap-1 bg-violet-50 text-violet-900 text-xs font-mono font-bold px-3 py-1 rounded-full border border-violet-200">
+                        <ShieldCheck className="w-3.5 h-3.5 text-violet-700" />
+                        Cashfree Order: {placedOrder.cashfreeOrderId}
                       </span>
                     )}
                   </div>
@@ -1027,9 +1070,9 @@ export const ExtendedCheckoutPage: React.FC<ExtendedCheckoutPageProps> = ({
                     <span className="font-bold text-slate-900 text-right max-w-xs">{placedOrder.customerAddress}</span>
                   </div>
                   <div className="flex justify-between border-b border-slate-200 pb-2">
-                    <span className="text-slate-500">Payment Mode:</span>
-                    <span className="font-bold text-indigo-900 uppercase">
-                      {placedOrder.stripePaymentIntentId ? 'Stripe Gateway' : placedOrder.paymentMethod}
+                    <span className="text-slate-500">Payment Gateway:</span>
+                    <span className="font-bold text-violet-900 uppercase">
+                      Cashfree Payments (Production)
                     </span>
                   </div>
                   <div className="flex justify-between">

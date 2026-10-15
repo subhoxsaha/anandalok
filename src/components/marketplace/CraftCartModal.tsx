@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { 
   ShoppingBag, Trash2, ShieldCheck, Heart, ArrowRight, CheckCircle, 
   MapPin, X, Plus, Minus, Truck, Sparkles, CreditCard, QrCode, Tag, ArrowLeft,
-  Package, Clock, Lock
+  Package, Clock, Lock, Building2, Zap, Loader2, AlertCircle
 } from 'lucide-react';
 import { ArtisanProduct, ArtisanOrder, User } from '../../types';
 import { GlassModal } from '../common/ReactBitsComponents';
 import confetti from 'canvas-confetti';
 import { saveOrder } from '../../lib/storage';
+import { createCashfreeOrder, verifyCashfreeOrder, launchCashfreeCheckout, pollCashfreeOrderStatus } from '../../lib/cashfreeService';
 
 interface CartItem {
   product: ArtisanProduct;
@@ -41,10 +42,20 @@ export const CraftCartModal: React.FC<CraftCartModalProps> = ({
   const [customerName, setCustomerName] = useState(currentUser?.name !== 'Guest User' ? currentUser?.name || '' : '');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'upi' | 'cod' | 'card'>('upi');
+  const [paymentMethod] = useState<'cashfree'>('cashfree');
+  const [selectedChannel, setSelectedChannel] = useState<'upi' | 'card' | 'netbanking'>('upi');
   const [couponCode, setCouponCode] = useState('');
   const [discountApplied, setDiscountApplied] = useState(false);
   const [couponError, setCouponError] = useState('');
+  const [isProcessingCashfree, setIsProcessingCashfree] = useState(false);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  const [paymentFailureInfo, setPaymentFailureInfo] = useState<{
+    orderId: string;
+    status: string;
+    reason: string;
+  } | null>(null);
+  const [cashfreeError, setCashfreeError] = useState('');
+  const [lastPlacedOrder, setLastPlacedOrder] = useState<ArtisanOrder | null>(null);
 
   if (!isOpen) return null;
 
@@ -66,35 +77,76 @@ export const CraftCartModal: React.FC<CraftCartModalProps> = ({
     }
   };
 
-  const handlePlaceOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    const newOrder: ArtisanOrder = {
-      id: `ord-${Date.now()}`,
-      customerName,
-      customerPhone,
-      customerAddress,
-      items: cart.map(item => ({
-        productId: item.product.id,
-        productTitle: item.product.title,
-        price: item.product.price,
-        quantity: item.quantity,
-        imageUrl: item.product.images[0]
-      })),
-      subtotal,
-      discount,
-      deliveryFee,
-      total,
-      paymentMethod,
-      date: new Date().toISOString().split('T')[0],
-      status: 'pending'
-    };
+  const handlePlaceOrder = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setCashfreeError('');
+    setPaymentFailureInfo(null);
+    setIsProcessingCashfree(true);
 
-    saveOrder(newOrder);
+    try {
+      // 1. Create real Cashfree Order session
+      const cfOrder = await createCashfreeOrder({
+        amount: total,
+        customerName: customerName.trim() || currentUser?.name || 'Valued Craft Supporter',
+        customerEmail: currentUser?.email || 'customer@anandalok.org',
+        customerPhone: customerPhone.trim() || '9876543210',
+        note: `Anandalok Artisan Cart Order (${cart.length} items)`,
+        returnUrl: `${window.location.origin}/?tab=marketplace&checkout=success&payment_id={order_id}`,
+      });
 
-    setStep('success');
-    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-    onClearCart();
+      // 2. Launch Cashfree Modal
+      await launchCashfreeCheckout(cfOrder.paymentSessionId);
+
+      // 3. Poll payment status directly from Cashfree Gateway
+      setIsProcessingCashfree(false);
+      setIsVerifyingPayment(true);
+
+      const statusResult = await pollCashfreeOrderStatus(cfOrder.orderId, 6, 2000);
+      setIsVerifyingPayment(false);
+
+      if (statusResult.paid || statusResult.orderStatus === 'PAID') {
+        const newOrder: ArtisanOrder = {
+          id: `ord-${Date.now()}`,
+          customerName: customerName.trim() || currentUser?.name || 'Valued Craft Supporter',
+          customerPhone: customerPhone.trim() || '9876543210',
+          customerAddress: customerAddress.trim() || 'Bengal Craft Patron Address',
+          items: cart.map(item => ({
+            productId: item.product.id,
+            productTitle: item.product.title,
+            price: item.product.price,
+            quantity: item.quantity,
+            imageUrl: item.product.images[0]
+          })),
+          subtotal,
+          discount,
+          deliveryFee,
+          total,
+          paymentMethod: 'cashfree',
+          date: new Date().toISOString().split('T')[0],
+          status: 'pending',
+          cashfreeOrderId: cfOrder.orderId,
+          cashfreePaymentId: String(statusResult.cfPaymentId || cfOrder.cfOrderId || cfOrder.orderId),
+          cashfreePaymentSessionId: cfOrder.paymentSessionId,
+        };
+
+        saveOrder(newOrder);
+        setLastPlacedOrder(newOrder);
+        setStep('success');
+        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        onClearCart();
+      } else {
+        setPaymentFailureInfo({
+          orderId: cfOrder.orderId,
+          status: statusResult.orderStatus,
+          reason: statusResult.failureReason || 'Payment could not be completed or was cancelled by user.',
+        });
+      }
+    } catch (err: any) {
+      console.error('Cart payment error:', err);
+      setIsProcessingCashfree(false);
+      setIsVerifyingPayment(false);
+      setCashfreeError(err.message || 'Payment initiation failed. Please try again.');
+    }
   };
 
   const resetModal = () => {
@@ -410,54 +462,132 @@ export const CraftCartModal: React.FC<CraftCartModalProps> = ({
               </div>
             </div>
 
-            {/* Payment Method Selector */}
-            <div className="space-y-2 bg-slate-50/60 p-3.5 rounded-xl border border-slate-200/80">
-              <h4 className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-amber-700" />
-                <span>Select Payment Option</span>
-              </h4>
+            {/* Cashfree Payments - Singular Payment Gateway (No COD) */}
+            <div className="space-y-3 bg-gradient-to-br from-violet-50/70 via-white to-amber-50/30 p-3.5 rounded-xl border-2 border-violet-200">
+              <div className="flex items-center justify-between">
+                <h4 className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
+                  <div className="w-5 h-5 rounded bg-violet-600 text-white flex items-center justify-center font-black text-[10px]">
+                    CF
+                  </div>
+                  <span>Cashfree Payments (Singular Gateway)</span>
+                </h4>
+                <span className="text-[9px] font-black uppercase tracking-wider bg-violet-100 text-violet-800 px-2 py-0.5 rounded">
+                  Production V3
+                </span>
+              </div>
 
-              <div className="grid grid-cols-3 gap-2 pt-1">
+              <div className="grid grid-cols-3 gap-2 pt-0.5">
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('upi')}
-                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${paymentMethod === 'upi' ? 'border-amber-600 bg-amber-50/90 text-amber-950 font-bold' : 'border-slate-200 bg-white text-slate-700'}`}
+                  onClick={() => setSelectedChannel('upi')}
+                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${selectedChannel === 'upi' ? 'border-violet-600 bg-violet-950 text-white font-bold' : 'border-slate-200 bg-white text-slate-700'}`}
                 >
-                  <QrCode className="w-4 h-4 text-amber-800" />
-                  <span className="text-[10px]">UPI / QR Code</span>
+                  <QrCode className="w-4 h-4 text-emerald-400" />
+                  <span className="text-[10px]">UPI / QR</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('cod')}
-                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${paymentMethod === 'cod' ? 'border-amber-600 bg-amber-50/90 text-amber-950 font-bold' : 'border-slate-200 bg-white text-slate-700'}`}
+                  onClick={() => setSelectedChannel('card')}
+                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${selectedChannel === 'card' ? 'border-violet-600 bg-violet-950 text-white font-bold' : 'border-slate-200 bg-white text-slate-700'}`}
                 >
-                  <Truck className="w-4 h-4 text-amber-800" />
-                  <span className="text-[10px]">Cash on Delivery</span>
+                  <CreditCard className="w-4 h-4 text-amber-400" />
+                  <span className="text-[10px]">Cards</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('card')}
-                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${paymentMethod === 'card' ? 'border-amber-600 bg-amber-50/90 text-amber-950 font-bold' : 'border-slate-200 bg-white text-slate-700'}`}
+                  onClick={() => setSelectedChannel('netbanking')}
+                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${selectedChannel === 'netbanking' ? 'border-violet-600 bg-violet-950 text-white font-bold' : 'border-slate-200 bg-white text-slate-700'}`}
                 >
-                  <CreditCard className="w-4 h-4 text-amber-800" />
-                  <span className="text-[10px]">Net Banking / Card</span>
+                  <Building2 className="w-4 h-4 text-sky-400" />
+                  <span className="text-[10px]">Netbanking</span>
                 </button>
               </div>
+
+              {cashfreeError && (
+                <p className="text-[11px] text-rose-600 font-bold bg-rose-50 p-2 rounded-lg border border-rose-200">
+                  {cashfreeError}
+                </p>
+              )}
             </div>
+
+            {/* Verification State */}
+            {isVerifyingPayment && (
+              <div className="p-4 bg-violet-50 rounded-xl border border-violet-200 text-center space-y-2">
+                <Loader2 className="w-6 h-6 text-violet-700 animate-spin mx-auto" />
+                <p className="text-xs font-black text-slate-900">Confirming payment with bank...</p>
+                <p className="text-[11px] text-slate-500">Please wait while Cashfree Gateway confirms status.</p>
+              </div>
+            )}
+
+            {/* Failure State */}
+            {paymentFailureInfo && !isVerifyingPayment && (
+              <div className="p-4 bg-rose-50 rounded-xl border border-rose-200 space-y-2.5">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-rose-950">Payment Unsuccessful</span>
+                      <span className="text-[9px] font-extrabold uppercase bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded">
+                        {paymentFailureInfo.status}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-rose-800 mt-0.5 leading-snug">
+                      {paymentFailureInfo.reason}
+                    </p>
+                  </div>
+                </div>
+                <div className="pt-1 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePlaceOrder()}
+                    className="flex-1 py-2 bg-violet-700 hover:bg-violet-800 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Retry Payment</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentFailureInfo(null);
+                      setStep('cart');
+                    }}
+                    className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-medium cursor-pointer"
+                  >
+                    Review Cart
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="p-2.5 bg-emerald-50/80 border border-emerald-200 rounded-xl text-emerald-900 font-medium flex items-center gap-2 text-[11px]">
               <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>100% Secure Checkout & Fair Wage Guarantee to Artisans</span>
+              <span>100% Cashfree Secure Checkout & Fair Wage Direct to Bengal Artisans</span>
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+              disabled={isProcessingCashfree || isVerifyingPayment}
+              className="w-full py-3 rounded-xl bg-violet-700 hover:bg-violet-800 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-70"
             >
-              <span>Confirm & Place Order (₹{total.toLocaleString()})</span>
-              <CheckCircle className="w-4 h-4 text-amber-400" />
+              {isProcessingCashfree ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Connecting to Cashfree Payments...</span>
+                </>
+              ) : isVerifyingPayment ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Verifying Payment...</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4 text-amber-300" />
+                  <span>Pay ₹{total.toLocaleString()} via Cashfree</span>
+                  <CheckCircle className="w-4 h-4 text-amber-400 ml-1" />
+                </>
+              )}
             </button>
           </form>
         )}
@@ -470,7 +600,9 @@ export const CraftCartModal: React.FC<CraftCartModalProps> = ({
             </div>
 
             <div className="space-y-1">
-              <span className="text-[11px] font-extrabold uppercase text-amber-800 tracking-wider">Order Confirmed</span>
+              <span className="text-[10px] font-black uppercase text-violet-800 bg-violet-100 px-2.5 py-0.5 rounded-full border border-violet-200 tracking-wider">
+                Cashfree Verified Order
+              </span>
               <h3 className="text-xl font-black text-slate-900">Thank You for Supporting Local Artisans!</h3>
               <p className="text-xs text-slate-600 max-w-md mx-auto pt-1">
                 Your order is being carefully packed by the Bengal Rural Women Cooperative. A tracking confirmation SMS will be sent to <strong className="text-slate-800">{customerPhone || 'your phone number'}</strong>.
@@ -481,12 +613,18 @@ export const CraftCartModal: React.FC<CraftCartModalProps> = ({
             <div className="bg-amber-50/60 p-3.5 rounded-xl border border-amber-200/80 text-left text-xs max-w-md mx-auto space-y-2">
               <div className="flex items-center justify-between text-slate-700 font-semibold border-b border-amber-200/60 pb-1.5">
                 <span className="flex items-center gap-1.5 text-amber-900">
-                  <Package className="w-4 h-4" /> Order Ref: #AND-{Math.floor(100000 + Math.random() * 900000)}
+                  <Package className="w-4 h-4" /> Order ID: {lastPlacedOrder?.id || `#AND-${Math.floor(100000 + Math.random() * 900000)}`}
                 </span>
                 <span className="text-emerald-700 font-bold flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5" /> 3-5 Business Days
                 </span>
               </div>
+              {lastPlacedOrder?.cashfreeOrderId && (
+                <div className="text-[11px] text-violet-800 font-mono flex items-center justify-between border-b border-amber-200/60 pb-1.5">
+                  <span className="font-sans text-slate-500">Cashfree Order:</span>
+                  <span className="font-bold">{lastPlacedOrder.cashfreeOrderId}</span>
+                </div>
+              )}
               {customerName && (
                 <p className="text-[11px] text-slate-600">
                   <strong>Deliver To:</strong> {customerName}, {customerAddress}
