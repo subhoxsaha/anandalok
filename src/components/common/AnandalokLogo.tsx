@@ -28,8 +28,8 @@ export const AnandalokLogo: React.FC<AnandalokLogoProps> = ({
       >
         {!imageError ? (
           <img
-            src="/assets/logo.webp"
-            alt="Anandalok Welfare Foundation Logo"
+            src="/assests/logo.webp"
+            alt="Anandalok Durgapur Logo"
             className="w-full h-full object-contain select-none rounded-full"
             loading="eager"
             referrerPolicy="no-referrer"
