@@ -58,7 +58,6 @@ import { CMSDashboard } from './components/cms/CMSDashboard';
 import { DonationModal } from './components/donation/DonationModal';
 import { AuthModal } from './components/auth/AuthModal';
 import { CraftCartModal } from './components/marketplace/CraftCartModal';
-import { FeedbackModal } from './components/common/FeedbackModal';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('home');
@@ -99,7 +98,6 @@ export default function App() {
   const [selectedCauseIdForDonate, setSelectedCauseIdForDonate] = useState<string | undefined>(undefined);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [selectedProductForDetail, setSelectedProductForDetail] = useState<ArtisanProduct | null>(null);
 
   // Subscribe to storage changes for live real-time state sync across tabs
@@ -287,7 +285,6 @@ export default function App() {
         onClearCart={handleClearCart}
         isCartDropdownOpen={isCartDropdownOpen}
         setIsCartDropdownOpen={setIsCartDropdownOpen}
-        onOpenFeedback={() => setIsFeedbackOpen(true)}
       />
 
       {/* Main View Router */}
@@ -327,6 +324,8 @@ export default function App() {
                 selectedProduct={selectedProductForDetail}
                 setSelectedProduct={setSelectedProductForDetail}
                 onOpenDonate={() => handleOpenDonate()}
+                currentUser={currentUser}
+                orders={orders}
               />
             )}
 
@@ -381,7 +380,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <Footer setActiveTab={setActiveTab} onOpenDonate={() => handleOpenDonate()} onOpenFeedback={() => setIsFeedbackOpen(true)} />
+      <Footer setActiveTab={setActiveTab} onOpenDonate={() => handleOpenDonate()} />
 
       {/* Global Modals */}
       <DonationModal
@@ -410,12 +409,6 @@ export default function App() {
         onClearCart={() => setCart([])}
         currentUser={currentUser}
         onOpenAuth={() => setIsAuthOpen(true)}
-      />
-
-      <FeedbackModal
-        isOpen={isFeedbackOpen}
-        onClose={() => setIsFeedbackOpen(false)}
-        currentUser={currentUser}
       />
     </div>
   );

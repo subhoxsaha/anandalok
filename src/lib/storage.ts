@@ -9,7 +9,8 @@ import {
   User,
   HeroImage,
   ArtisanOrder,
-  UserFeedback
+  UserFeedback,
+  ProductReview
 } from '../types';
 import {
   INITIAL_CAUSES,
@@ -38,7 +39,8 @@ const KEYS = {
   USERS: 'anandalok_users_v1',
   HERO_IMAGES: 'anandalok_hero_images_v1',
   ORDERS: 'anandalok_orders_v1',
-  FEEDBACK: 'anandalok_feedback_v1'
+  FEEDBACK: 'anandalok_feedback_v1',
+  REVIEWS: 'anandalok_reviews_v1'
 };
 
 // Simple event target for reactive cross-component state updates
@@ -122,6 +124,7 @@ setupFirestoreSync<VolunteerRegistration>('volunteers', KEYS.VOLUNTEERS, 'volunt
 setupFirestoreSync<ArtisanOrder>('orders', KEYS.ORDERS, 'orders_changed', []);
 setupFirestoreSync<User>('users', KEYS.USERS, 'users_changed', INITIAL_USERS);
 setupFirestoreSync<UserFeedback>('feedback', KEYS.FEEDBACK, 'feedback_changed', INITIAL_FEEDBACK);
+setupFirestoreSync<ProductReview>('product_reviews', KEYS.REVIEWS, 'reviews_changed', []);
 
 // CAUSES
 export function getCauses(): Cause[] {
@@ -411,6 +414,7 @@ export function resetDemoData() {
   setStored(KEYS.DONATIONS, [], 'donations_changed');
   setStored(KEYS.VOLUNTEERS, [], 'volunteers_changed');
   setStored(KEYS.ORDERS, [], 'orders_changed');
+  setStored(KEYS.REVIEWS, [], 'reviews_changed');
 }
 
 // ARTISAN ORDERS
@@ -490,5 +494,59 @@ export function deleteFeedback(id: string) {
   deleteDoc(doc(db, 'feedback', id)).catch((err) =>
     console.error('Firestore deleteFeedback error:', err)
   );
+}
+
+// PRODUCT REVIEWS
+export function getProductReviews(productId?: string): ProductReview[] {
+  const all = getStored<ProductReview[]>(KEYS.REVIEWS, []);
+  if (productId) {
+    return all.filter((r) => r.productId === productId);
+  }
+  return all;
+}
+
+export function saveProductReview(review: ProductReview) {
+  const reviews = getStored<ProductReview[]>(KEYS.REVIEWS, []);
+  const index = reviews.findIndex((r) => r.id === review.id);
+  if (index >= 0) {
+    reviews[index] = review;
+  } else {
+    reviews.unshift(review);
+  }
+  setStored(KEYS.REVIEWS, reviews, 'reviews_changed');
+  setDoc(doc(db, 'product_reviews', review.id), review).catch((err) =>
+    console.error('Firestore saveProductReview error:', err)
+  );
+
+  // Dynamically update product review count and average rating
+  const products = getProducts();
+  const prod = products.find((p) => p.id === review.productId);
+  if (prod) {
+    const prodReviews = reviews.filter((r) => r.productId === review.productId);
+    const avgRating = prodReviews.reduce((sum, r) => sum + r.rating, 0) / prodReviews.length;
+    prod.rating = Number(avgRating.toFixed(1));
+    prod.reviewsCount = prodReviews.length;
+    saveProduct(prod);
+  }
+}
+
+export function deleteProductReview(id: string) {
+  const reviews = getStored<ProductReview[]>(KEYS.REVIEWS, []).filter((r) => r.id !== id);
+  setStored(KEYS.REVIEWS, reviews, 'reviews_changed');
+  deleteDoc(doc(db, 'product_reviews', id)).catch((err) =>
+    console.error('Firestore deleteProductReview error:', err)
+  );
+}
+
+export function addReviewHelpful(reviewId: string) {
+  const reviews = getStored<ProductReview[]>(KEYS.REVIEWS, []);
+  const review = reviews.find((r) => r.id === reviewId);
+  if (review) {
+    review.helpfulCount = (review.helpfulCount || 0) + 1;
+    setStored(KEYS.REVIEWS, reviews, 'reviews_changed');
+    setDoc(doc(db, 'product_reviews', review.id), review).catch((err) =>
+      console.error('Firestore addReviewHelpful error:', err)
+    );
+  }
 }
 

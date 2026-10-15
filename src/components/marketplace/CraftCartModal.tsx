@@ -379,7 +379,7 @@ export const CraftCartModal: React.FC<CraftCartModalProps> = ({
                     required
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="e.g. Ananya Roy"
+                    placeholder="e.g. Your Full Name"
                     className="w-full mt-1 p-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-amber-600"
                   />
                 </div>

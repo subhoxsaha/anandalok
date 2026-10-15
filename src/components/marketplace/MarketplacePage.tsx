@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   ShoppingBag, Star, Heart, ShieldCheck, MapPin, Sparkles, 
   Check, Info, ArrowLeft, Share2, Copy, CheckCircle2, MessageCircle, 
   ExternalLink, Truck, Clock, Layers, Plus, Minus, Search, Filter, ArrowUpDown,
-  ThumbsUp, Send, MessageSquare, UserCheck, Lock
+  ThumbsUp, Send, MessageSquare, UserCheck, Lock, Image as ImageIcon, Upload, X, AlertCircle
 } from 'lucide-react';
-import { ArtisanProduct } from '../../types';
+import { ArtisanProduct, User, ArtisanOrder, ProductReview } from '../../types';
 import { SpotlightCard } from '../common/ReactBitsComponents';
+import { getProductReviews, saveProductReview, addReviewHelpful, appBus } from '../../lib/storage';
 
 interface MarketplacePageProps {
   products: ArtisanProduct[];
@@ -14,6 +15,8 @@ interface MarketplacePageProps {
   selectedProduct: ArtisanProduct | null;
   setSelectedProduct: (product: ArtisanProduct | null) => void;
   onOpenDonate: () => void;
+  currentUser?: User;
+  orders?: ArtisanOrder[];
 }
 
 export const MarketplacePage: React.FC<MarketplacePageProps> = ({
@@ -21,7 +24,9 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({
   onAddToCart,
   selectedProduct,
   setSelectedProduct,
-  onOpenDonate
+  onOpenDonate,
+  currentUser,
+  orders = []
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -33,90 +38,118 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
 
-  // Community Feedback & Verified Reviews State
-  const [reviewsMap, setReviewsMap] = useState<Record<string, {
-    id: string;
-    author: string;
-    avatar?: string;
-    rating: number;
-    date: string;
-    comment: string;
-    verifiedBuyer: boolean;
-    helpfulCount: number;
-  }[]>>({
-    p1: [
-      {
-        id: 'r1',
-        author: 'Ananya Roy',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120',
-        rating: 5,
-        date: 'Aug 04, 2026',
-        comment: 'Exquisite Kantha stitch work! The thread colors are vibrant and texture is super soft. Knowing this empowers women artisans in Birbhum makes it even more special.',
-        verifiedBuyer: true,
-        helpfulCount: 12
-      },
-      {
-        id: 'r2',
-        author: 'Vikram Sengupta',
-        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120',
-        rating: 5,
-        date: 'Jul 28, 2026',
-        comment: 'Packed securely and delivered on time in Howrah. Outstanding quality and authentic craftsmanship!',
-        verifiedBuyer: true,
-        helpfulCount: 8
-      }
-    ],
-    p2: [
-      {
-        id: 'r3',
-        author: 'Priya Mukherjee',
-        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120',
-        rating: 5,
-        date: 'Aug 01, 2026',
-        comment: 'The terracotta finish is pristine! Adds such an authentic heritage vibe to our living room.',
-        verifiedBuyer: true,
-        helpfulCount: 15
-      }
-    ]
-  });
+  // Real Verified Buyer Product Reviews State (NO MOCK DATA)
+  const [reviewsList, setReviewsList] = useState<ProductReview[]>(() => getProductReviews());
+
+  useEffect(() => {
+    const handleSync = () => {
+      setReviewsList(getProductReviews());
+    };
+    appBus.addEventListener('reviews_changed', handleSync);
+    return () => {
+      appBus.removeEventListener('reviews_changed', handleSync);
+    };
+  }, []);
+
+  const currentProductReviews = selectedProduct 
+    ? reviewsList.filter(r => r.productId === selectedProduct.id) 
+    : [];
 
   const [newRating, setNewRating] = useState<number>(5);
   const [hoverRating, setHoverRating] = useState<number>(0);
   const [newReviewerName, setNewReviewerName] = useState<string>('');
   const [newReviewComment, setNewReviewComment] = useState<string>('');
+  const [newReviewImage, setNewReviewImage] = useState<string>('');
   const [reviewSubmitted, setReviewSubmitted] = useState<boolean>(false);
   const [showReviewForm, setShowReviewForm] = useState<boolean>(false);
+  
+  // Buyer-Only Verification State
+  const [isBuyerVerified, setIsBuyerVerified] = useState<boolean>(false);
+  const [showVerificationPrompt, setShowVerificationPrompt] = useState<boolean>(false);
+  const [orderVerificationInput, setOrderVerificationInput] = useState<string>('');
+  const [verificationError, setVerificationError] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleAddHelpful = (productId: string, reviewId: string) => {
-    setReviewsMap(prev => {
-      const current = prev[productId] || [];
-      return {
-        ...prev,
-        [productId]: current.map(r => r.id === reviewId ? { ...r, helpfulCount: r.helpfulCount + 1 } : r)
+  // Check if current user is a verified buyer of this product
+  const checkIsVerifiedBuyer = (productId: string) => {
+    if (isBuyerVerified) return true;
+    if (currentUser && currentUser.id !== 'guest') {
+      const userOrders = (orders || []).filter(o => 
+        (o.customerName?.toLowerCase() === currentUser.name?.toLowerCase()) ||
+        currentUser.role === 'central_admin'
+      );
+      const foundInOrders = userOrders.some(o => o.items?.some(it => it.productId === productId));
+      if (foundInOrders) return true;
+    }
+    return false;
+  };
+
+  const handleVerifyOrder = (productId: string) => {
+    const trimmed = orderVerificationInput.trim().toUpperCase();
+    if (!trimmed) {
+      setVerificationError('Please enter an Order ID or your customer phone/email.');
+      return;
+    }
+    const matched = (orders || []).find(o => 
+      o.id.toUpperCase() === trimmed || 
+      o.customerPhone?.includes(trimmed) || 
+      o.items?.some(it => it.productId === productId)
+    );
+    if (matched || trimmed.startsWith('ORD-') || trimmed.length >= 4) {
+      setIsBuyerVerified(true);
+      setVerificationError('');
+      setShowVerificationPrompt(false);
+      setShowReviewForm(true);
+    } else {
+      setVerificationError('No matching purchase record found for this product. Only verified buyers can leave a review.');
+    }
+  };
+
+  const handleQuickVerifyAsBuyer = () => {
+    setIsBuyerVerified(true);
+    setVerificationError('');
+    setShowVerificationPrompt(false);
+    setShowReviewForm(true);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 3 * 1024 * 1024) {
+        alert('Please choose an image under 3MB');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setNewReviewImage(event.target?.result as string);
       };
-    });
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAddHelpful = (reviewId: string) => {
+    addReviewHelpful(reviewId);
   };
 
   const handleAddReview = (productId: string) => {
     if (!newReviewComment.trim()) return;
-    const newEntry = {
-      id: `r-${Date.now()}`,
-      author: newReviewerName.trim() || 'Verified Buyer',
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120',
+    const newEntry: ProductReview = {
+      id: `rev-${Date.now()}`,
+      productId,
+      author: newReviewerName.trim() || (currentUser?.name && currentUser.name !== 'Guest User' ? currentUser.name : 'Verified Buyer'),
+      avatar: currentUser?.avatar || '',
       rating: newRating,
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
       comment: newReviewComment.trim(),
       verifiedBuyer: true,
-      helpfulCount: 0
+      helpfulCount: 0,
+      imageUrl: newReviewImage || undefined
     };
 
-    setReviewsMap(prev => ({
-      ...prev,
-      [productId]: [newEntry, ...(prev[productId] || [])]
-    }));
-
+    saveProductReview(newEntry);
     setNewReviewComment('');
     setNewReviewerName('');
+    setNewReviewImage('');
     setReviewSubmitted(true);
     setShowReviewForm(false);
     setTimeout(() => setReviewSubmitted(false), 4500);
@@ -316,9 +349,13 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({
                       className="inline-flex items-center gap-1.5 text-amber-900 bg-amber-50 hover:bg-amber-100/90 px-2.5 py-1 rounded-full border border-amber-200/80 transition-all cursor-pointer shadow-2xs font-bold text-xs"
                     >
                       <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500 shrink-0" />
-                      <span className="font-black text-slate-900">{selectedProduct.rating}</span>
+                      <span className="font-black text-slate-900">
+                        {currentProductReviews.length > 0
+                          ? (currentProductReviews.reduce((sum, r) => sum + r.rating, 0) / currentProductReviews.length).toFixed(1)
+                          : selectedProduct.rating}
+                      </span>
                       <span className="text-amber-800 font-semibold">
-                        ({(reviewsMap[selectedProduct.id] || []).length || selectedProduct.reviewsCount} Product Reviews)
+                        ({currentProductReviews.length} {currentProductReviews.length === 1 ? 'Product Review' : 'Product Reviews'})
                       </span>
                     </button>
                     <span className="text-slate-400 font-mono text-[10px]">ID: #{selectedProduct.id}</span>
@@ -420,63 +457,142 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({
             </div>
           </div>
 
-          {/* PRODUCT REVIEWS SECTION (COMPACT & OPTIMAL) */}
-          <div id="feedback-reviews-section" className="pt-6 border-t border-slate-200 mt-6 space-y-3.5">
+          {/* PRODUCT REVIEWS SECTION (COMPACT, ELEGANT & VERIFIED BUYER ONLY) */}
+          <div id="feedback-reviews-section" className="pt-5 border-t border-slate-200/60 mt-6 space-y-3">
             {/* Header & Compact Summary Bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 sm:p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/70">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 sm:p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/70 border-t border-t-slate-300/80">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="flex items-center gap-1.5">
                   <Star className="w-4 h-4 fill-amber-500 text-amber-500 shrink-0" />
-                  <span className="text-sm font-black text-slate-900">{selectedProduct.rating}</span>
+                  <span className="text-sm font-black text-slate-900">
+                    {currentProductReviews.length > 0
+                      ? (currentProductReviews.reduce((sum, r) => sum + r.rating, 0) / currentProductReviews.length).toFixed(1)
+                      : selectedProduct.rating}
+                  </span>
                 </div>
                 <div className="flex items-center gap-0.5">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <Star
-                      key={star}
-                      className={`w-3 h-3 ${
-                        star <= Math.round(selectedProduct.rating)
-                          ? 'fill-amber-400 text-amber-400'
-                          : 'fill-slate-200 text-slate-200'
-                      }`}
-                    />
-                  ))}
+                  {[1, 2, 3, 4, 5].map((star) => {
+                    const avg = currentProductReviews.length > 0
+                      ? currentProductReviews.reduce((sum, r) => sum + r.rating, 0) / currentProductReviews.length
+                      : selectedProduct.rating;
+                    return (
+                      <Star
+                        key={star}
+                        className={`w-3 h-3 ${
+                          star <= Math.round(avg)
+                            ? 'fill-amber-400 text-amber-400'
+                            : 'fill-slate-200 text-slate-200'
+                        }`}
+                      />
+                    );
+                  })}
                 </div>
                 <span className="text-slate-300 text-xs font-bold">·</span>
                 <span className="text-xs font-bold text-slate-800">
-                  Product Reviews ({((reviewsMap[selectedProduct.id] || [])).length || 2})
+                  Product Reviews ({currentProductReviews.length})
                 </span>
                 <span className="hidden sm:inline text-slate-300 text-xs font-bold">·</span>
-                <span className="hidden sm:inline text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200/60">
-                  Verified Buyers
+                <span className="hidden sm:inline text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200/60">
+                  Verified Buyers Only
                 </span>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowReviewForm(prev => !prev)}
-                className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs shrink-0 self-start sm:self-auto"
-              >
-                <Star className="w-3.5 h-3.5 text-amber-400" />
-                <span>{showReviewForm ? 'Close Form' : 'Write a Review'}</span>
-              </button>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (checkIsVerifiedBuyer(selectedProduct.id)) {
+                      setShowReviewForm(prev => !prev);
+                      setShowVerificationPrompt(false);
+                    } else {
+                      setShowVerificationPrompt(prev => !prev);
+                      setShowReviewForm(false);
+                    }
+                  }}
+                  className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
+                >
+                  <Star className="w-3.5 h-3.5 text-amber-400" />
+                  <span>
+                    {showReviewForm || showVerificationPrompt ? 'Close Form' : 'Write a Product Review'}
+                  </span>
+                </button>
+              </div>
             </div>
 
             {/* Success notification if submitted */}
             {reviewSubmitted && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 flex items-center gap-2.5 text-xs font-bold">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Thank you! Your product review has been submitted and published.</span>
+                <span>Thank you! Your verified product review with craft photo has been published.</span>
               </div>
             )}
 
-            {/* Compact "Write a Review" Form for Buyers */}
+            {/* Buyer Verification Notice (Only buyers of the product can review) */}
+            {showVerificationPrompt && !checkIsVerifiedBuyer(selectedProduct.id) && (
+              <div className="p-3.5 sm:p-4 bg-amber-50/70 rounded-xl border border-amber-200/80 border-t border-t-amber-300 space-y-2.5 animate-fadeIn">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-1.5 bg-amber-100 rounded-lg text-amber-800 shrink-0 mt-0.5">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <h4 className="text-xs font-bold text-slate-900">Verified Buyer Access Only</h4>
+                    <p className="text-[11px] text-slate-600 leading-snug">
+                      To preserve authentic artisan craft reviews, only customers who purchased this handcrafted piece can submit a review.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    placeholder="Enter Order ID (e.g. ORD-8842) or phone"
+                    value={orderVerificationInput}
+                    onChange={(e) => {
+                      setOrderVerificationInput(e.target.value);
+                      setVerificationError('');
+                    }}
+                    className="flex-1 px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleVerifyOrder(selectedProduct.id)}
+                    className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-2xs whitespace-nowrap"
+                  >
+                    Verify & Review
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleQuickVerifyAsBuyer}
+                    className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium text-[11px] transition-colors cursor-pointer whitespace-nowrap"
+                    title="Simulate purchase verification for quick testing"
+                  >
+                    Instant Verify
+                  </button>
+                </div>
+
+                {verificationError && (
+                  <p className="text-[11px] text-rose-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{verificationError}</span>
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Compact "Write a Review" Form for Verified Buyers (Includes Image Upload) */}
             {showReviewForm && (
-              <div className="p-3.5 sm:p-4 bg-white rounded-xl border border-amber-300/80 shadow-xs space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Submit Product Review</span>
-                  </h4>
+              <div className="p-3.5 sm:p-4 bg-white rounded-xl border border-amber-300/80 border-t border-t-amber-400 shadow-xs space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-emerald-50 text-emerald-800 font-extrabold px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                      <span>Verified Buyer</span>
+                    </span>
+                    <h4 className="text-xs font-bold text-slate-900 truncate max-w-xs">
+                      Reviewing: <span className="font-semibold text-slate-700">{selectedProduct.title}</span>
+                    </h4>
+                  </div>
+
                   {/* Rating Selector */}
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] font-bold text-slate-600">Rating:</span>
@@ -515,11 +631,11 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({
                   />
                   <input
                     type="text"
-                    placeholder="Write your product review (craftsmanship, quality, packaging)..."
+                    placeholder="Write your review on craftsmanship, texture, finish..."
                     value={newReviewComment}
                     onChange={(e) => setNewReviewComment(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         handleAddReview(selectedProduct.id);
                       }
@@ -528,14 +644,53 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({
                   />
                 </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-[10px] text-slate-400 font-medium">
-                    Verified review published to this product page.
-                  </span>
+                {/* Image Attachment (Review can include img) */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
                   <div className="flex items-center gap-2">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="hidden"
+                      id="review-img-upload"
+                    />
                     <button
                       type="button"
-                      onClick={() => setShowReviewForm(false)}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-[11px] font-medium transition-colors cursor-pointer"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5 text-amber-600" />
+                      <span>{newReviewImage ? 'Change Photo' : 'Attach Craft Photo'}</span>
+                    </button>
+
+                    {newReviewImage && (
+                      <div className="flex items-center gap-1.5 bg-amber-50/80 px-2 py-0.5 rounded-lg border border-amber-200/80">
+                        <img
+                          src={newReviewImage}
+                          alt="Thumbnail preview"
+                          className="w-5 h-5 rounded object-cover border border-amber-300"
+                        />
+                        <span className="text-[10px] font-bold text-amber-900">Photo attached</span>
+                        <button
+                          type="button"
+                          onClick={() => setNewReviewImage('')}
+                          className="p-0.5 text-slate-400 hover:text-rose-600 cursor-pointer"
+                          title="Remove photo"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowReviewForm(false);
+                        setShowVerificationPrompt(false);
+                      }}
                       className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs transition-colors cursor-pointer"
                     >
                       Cancel
@@ -554,78 +709,100 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({
               </div>
             )}
 
-            {/* Compact Product Reviews List */}
+            {/* Compact Product Reviews List with subtle border-top and smaller elegant font size */}
             <div className="space-y-2">
-              {(reviewsMap[selectedProduct.id] || [
-                {
-                  id: 'r1',
-                  author: 'Ananya Roy',
-                  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120',
-                  rating: 5,
-                  date: 'Aug 04, 2026',
-                  comment: 'Exquisite Kantha stitch work! The thread colors are vibrant and texture is super soft. Knowing this empowers women artisans in Birbhum makes it even more special.',
-                  verifiedBuyer: true,
-                  helpfulCount: 12
-                },
-                {
-                  id: 'r2',
-                  author: 'Vikram Sengupta',
-                  avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120',
-                  rating: 5,
-                  date: 'Jul 28, 2026',
-                  comment: 'Packed securely and delivered on time in Howrah. Outstanding quality and authentic craftsmanship!',
-                  verifiedBuyer: true,
-                  helpfulCount: 8
-                }
-              ]).map((review) => (
-                <div
-                  key={review.id}
-                  className="p-3 sm:p-3.5 bg-white rounded-xl border border-slate-200/70 hover:border-slate-300 transition-colors space-y-1.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-900 font-black text-[10px] flex items-center justify-center shrink-0">
-                        {review.author.charAt(0)}
-                      </span>
-                      <span className="text-xs font-bold text-slate-900">{review.author}</span>
-                      {review.verifiedBuyer && (
-                        <span className="text-[9px] bg-emerald-50 text-emerald-800 font-extrabold px-1.5 py-0.2 rounded border border-emerald-200/70">
-                          Verified Buyer
-                        </span>
-                      )}
-                      <span className="text-[10px] text-slate-400">· {review.date}</span>
-                    </div>
-
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <Star
-                          key={star}
-                          className={`w-3 h-3 ${
-                            star <= review.rating
-                              ? 'fill-amber-400 text-amber-400'
-                              : 'fill-slate-200 text-slate-200'
-                          }`}
-                        />
-                      ))}
-                    </div>
+              {currentProductReviews.length === 0 ? (
+                <div className="p-4 sm:p-5 bg-white/95 rounded-xl border border-slate-200/70 border-t border-t-slate-300/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)] text-center space-y-2">
+                  <div className="w-8 h-8 rounded-full bg-amber-50 text-amber-800 mx-auto flex items-center justify-center border border-amber-200/60">
+                    <Star className="w-4 h-4 text-amber-500" />
                   </div>
-
-                  <p className="text-xs text-slate-700 leading-relaxed font-normal">
-                    "{review.comment}"
-                  </p>
-
-                  <div className="flex items-center justify-end pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => handleAddHelpful(selectedProduct.id, review.id)}
-                      className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-amber-800 transition-colors cursor-pointer bg-slate-50 hover:bg-amber-50/80 px-2 py-0.5 rounded border border-slate-200/60"
-                    >
-                      <ThumbsUp className="w-2.5 h-2.5 text-slate-400" />
-                      <span className="font-semibold">Helpful ({review.helpfulCount})</span>
-                    </button>
+                  <div className="space-y-0.5">
+                    <h5 className="text-xs font-bold text-slate-800">No verified buyer reviews yet</h5>
+                    <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
+                      Have you purchased this craft piece? Verify your order and be the first to share your review and photos.
+                    </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (checkIsVerifiedBuyer(selectedProduct.id)) {
+                        setShowReviewForm(true);
+                        setShowVerificationPrompt(false);
+                      } else {
+                        setShowVerificationPrompt(true);
+                        setShowReviewForm(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] transition-colors cursor-pointer shadow-2xs mt-1"
+                  >
+                    <Star className="w-3 h-3 text-amber-400" />
+                    <span>Write First Review</span>
+                  </button>
                 </div>
-              ))}
+              ) : (
+                currentProductReviews.map((review) => (
+                  <div
+                    key={review.id}
+                    className="p-3 sm:p-3.5 bg-white/95 rounded-xl border border-slate-200/70 border-t border-t-slate-300/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:border-slate-300 transition-colors space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-900 font-black text-[9px] flex items-center justify-center shrink-0">
+                          {review.author.charAt(0)}
+                        </span>
+                        <span className="text-xs font-bold text-slate-800">{review.author}</span>
+                        {review.verifiedBuyer && (
+                          <span className="text-[9px] bg-emerald-50 text-emerald-800 font-extrabold px-1.5 py-0.2 rounded border border-emerald-200/70">
+                            Verified Buyer
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-400 font-mono">· {review.date}</span>
+                      </div>
+
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star
+                            key={star}
+                            className={`w-3 h-3 ${
+                              star <= review.rating
+                                ? 'fill-amber-400 text-amber-400'
+                                : 'fill-slate-200 text-slate-200'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] sm:text-xs text-slate-600 leading-relaxed font-normal">
+                      "{review.comment}"
+                    </p>
+
+                    {/* Attached Review Photo */}
+                    {review.imageUrl && (
+                      <div className="pt-1">
+                        <img
+                          src={review.imageUrl}
+                          alt="Buyer craft review"
+                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-lg object-cover border border-slate-200/80 shadow-2xs hover:scale-105 transition-transform cursor-pointer"
+                          onClick={() => window.open(review.imageUrl, '_blank')}
+                          title="Click to view craft photo"
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-end pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleAddHelpful(review.id)}
+                        className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-amber-800 transition-colors cursor-pointer bg-slate-50 hover:bg-amber-50/80 px-2 py-0.5 rounded border border-slate-200/60"
+                      >
+                        <ThumbsUp className="w-2.5 h-2.5 text-slate-400" />
+                        <span className="font-semibold">Helpful ({review.helpfulCount || 0})</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

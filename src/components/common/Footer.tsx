@@ -6,10 +6,9 @@ import { AnimatedDonateButton } from './AnimatedDonateButton';
 interface FooterProps {
   setActiveTab: (tab: string) => void;
   onOpenDonate: () => void;
-  onOpenFeedback?: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ setActiveTab, onOpenDonate, onOpenFeedback }) => {
+export const Footer: React.FC<FooterProps> = ({ setActiveTab, onOpenDonate }) => {
   return (
     <footer className="bg-slate-950 text-slate-300 pt-16 pb-12 border-t border-slate-800/80 relative overflow-hidden">
       {/* Ambient background glow */}
@@ -100,14 +99,6 @@ export const Footer: React.FC<FooterProps> = ({ setActiveTab, onOpenDonate, onOp
                   Field Update Stories
                 </button>
               </li>
-              {onOpenFeedback && (
-                <li>
-                  <button onClick={onOpenFeedback} className="text-amber-400 hover:text-amber-300 transition-colors cursor-pointer text-left font-bold flex items-center gap-1">
-                    <span>Community Feedback</span>
-                    <span className="text-[9px] bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-400/40">Reviews</span>
-                  </button>
-                </li>
-              )}
               <li>
                 <button onClick={() => setActiveTab('cms')} className="hover:text-amber-400 transition-colors cursor-pointer text-left">
                   Staff CMS Portal Login

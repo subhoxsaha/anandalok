@@ -186,3 +186,17 @@ export interface UserFeedback {
   status?: 'published' | 'pending';
 }
 
+export interface ProductReview {
+  id: string;
+  productId: string;
+  author: string;
+  avatar?: string;
+  rating: number;
+  date: string;
+  comment: string;
+  verifiedBuyer: boolean;
+  helpfulCount: number;
+  imageUrl?: string;
+  orderId?: string;
+}
+

@@ -94,8 +94,8 @@ export const INITIAL_ARTISAN_PRODUCTS: ArtisanProduct[] = [
     category: 'textiles',
     price: 1250,
     originalPrice: 1600,
-    rating: 4.9,
-    reviewsCount: 34,
+    rating: 5.0,
+    reviewsCount: 0,
     inStock: 15,
     images: [
       'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=800',
@@ -117,8 +117,8 @@ export const INITIAL_ARTISAN_PRODUCTS: ArtisanProduct[] = [
     category: 'pottery',
     price: 680,
     originalPrice: 850,
-    rating: 4.8,
-    reviewsCount: 22,
+    rating: 5.0,
+    reviewsCount: 0,
     inStock: 20,
     images: [
       'https://images.unsplash.com/photo-1578749556568-bc2c40e68b61?auto=format&fit=crop&q=80&w=800',
@@ -140,8 +140,8 @@ export const INITIAL_ARTISAN_PRODUCTS: ArtisanProduct[] = [
     category: 'jute_crafts',
     price: 450,
     originalPrice: 600,
-    rating: 4.9,
-    reviewsCount: 51,
+    rating: 5.0,
+    reviewsCount: 0,
     inStock: 30,
     images: [
       'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&q=80&w=800',
@@ -164,7 +164,7 @@ export const INITIAL_ARTISAN_PRODUCTS: ArtisanProduct[] = [
     price: 990,
     originalPrice: 1300,
     rating: 5.0,
-    reviewsCount: 19,
+    reviewsCount: 0,
     inStock: 8,
     images: [
       'https://images.unsplash.com/photo-1513519245088-0e12902e5a38?auto=format&fit=crop&q=80&w=800',
@@ -186,8 +186,8 @@ export const INITIAL_ARTISAN_PRODUCTS: ArtisanProduct[] = [
     category: 'jewelry',
     price: 420,
     originalPrice: 550,
-    rating: 4.7,
-    reviewsCount: 28,
+    rating: 5.0,
+    reviewsCount: 0,
     inStock: 25,
     images: [
       'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?auto=format&fit=crop&q=80&w=800',
@@ -209,8 +209,8 @@ export const INITIAL_ARTISAN_PRODUCTS: ArtisanProduct[] = [
     category: 'textiles',
     price: 580,
     originalPrice: 750,
-    rating: 4.9,
-    reviewsCount: 41,
+    rating: 5.0,
+    reviewsCount: 0,
     inStock: 18,
     images: [
       'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&q=80&w=800'

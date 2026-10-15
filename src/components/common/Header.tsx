@@ -41,7 +41,6 @@ interface HeaderProps {
   onClearCart?: () => void;
   isCartDropdownOpen?: boolean;
   setIsCartDropdownOpen?: (open: boolean) => void;
-  onOpenFeedback?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -57,8 +56,7 @@ export const Header: React.FC<HeaderProps> = ({
   onRemoveItem,
   onClearCart,
   isCartDropdownOpen,
-  setIsCartDropdownOpen,
-  onOpenFeedback
+  setIsCartDropdownOpen
 }) => {
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [internalCartOpen, setInternalCartOpen] = useState(false);
@@ -422,19 +420,6 @@ export const Header: React.FC<HeaderProps> = ({
                         <Heart className="w-3.5 h-3.5 text-rose-500" />
                         <span>Donate / Contribute</span>
                       </button>
-
-                      {onOpenFeedback && (
-                        <button
-                          onClick={() => {
-                            onOpenFeedback();
-                            setProfileDropdownOpen(false);
-                          }}
-                          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-amber-50 hover:text-amber-900 transition-colors cursor-pointer text-left"
-                        >
-                          <MessageSquareHeart className="w-3.5 h-3.5 text-amber-700" />
-                          <span>Community Feedback & Reviews</span>
-                        </button>
-                      )}
 
                       {currentUser.id === 'guest' ? (
                         <button
